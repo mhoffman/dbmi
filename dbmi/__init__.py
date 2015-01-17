@@ -32,7 +32,7 @@ def merge(dict1, dict2):
             yield (k, dict2[k])
 
 
-def calculate_interaction_energy(interactions, adsorbates, IR, pbc=None, verbose=False):
+def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbose=False):
     if verbose:
         if pbc:
             print('Unit cell Size ({}x{})'.format(pbc[0], pbc[1]))
