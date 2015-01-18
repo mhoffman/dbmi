@@ -1,6 +1,7 @@
 # dbmi
 
 This python module implements an approximate theory for calculating spatially resolved adsorbate-adsorbate interactions based on relative shifts of different d-band centers.
+
 As input it requires one DFT calculation with accompanying projected density of states for each: the empty (clean) substrate surface (primitive surface unit cell), an optimized adsorbate geometry in the low coverage limit (i.e. 3x3 - 6x6) surface slab and an optimized geometry of the high coverage limit (i.e. 1x1 or 2x2 overlayer). So far the surface are limited to those where the primitive surface unit cell consists of only one surface atom ((100), (110), or (111)). Currently only works with files from QuantumEspresso calculations using the ase-espresso interface of ASE.
 
 
