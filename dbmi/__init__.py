@@ -158,7 +158,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
                              hicov_logfile, hicov_dosfile,
                              verbose=False,
                              spinpol=False,
-                             adsorbate_species=['C', 'H', 'O', 'N'],
+                             adsorbate_species=['C', 'H', 'O', 'N', 'F', 'S', 'Cl', 'P'],
                              surface_tol=1.,
                              ):
     """
