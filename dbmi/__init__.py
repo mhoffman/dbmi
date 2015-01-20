@@ -20,7 +20,7 @@ def merge(dict1, dict2):
     for k in set(dict1.keys()).union(dict2.keys()):
         if k in dict1 and k in dict2:
             if isinstance(dict1[k], dict) and isinstance(dict2[k], dict):
-                yield (k, dict(mergedicts(dict1[k], dict2[k])))
+                yield (k, dict(merge(dict1[k], dict2[k])))
             else:
                 # If one of the values is not a dict, you can't continue merging it.
                 # Value from second dict overrides one in first and we move on.
@@ -289,7 +289,6 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         locov.get_chemical_symbols()) if species in adsorbate_species]
     slab_atoms = [i for i, species in enumerate(
         locov.get_chemical_symbols()) if species not in adsorbate_species]
-    surface_atom = slab_atoms[np.argmax(locov.positions[slab_atoms, 2])]
     max_z = locov.positions[surface_atom, 2]
     surface_atoms = [i for i, z in enumerate(
         locov.positions[:, 2]) if abs(max_z - z) < surface_tol]
@@ -299,13 +298,15 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     if verbose:
         print('Lowest Adsorbate Atom {lowest_adsorbate_atom}'.format(**locals()))
-        print('Surface Atom {surface_atom}'.format(**locals()))
         print('Surface Atoms {surface_atoms}'.format(**locals()))
+
     for surface_atom in surface_atoms:
-        # get the offset belong to the Minimum Image Convention
+        # get the offset belonging to the Minimum Image Convention
         mic_positions = [(locov.positions[surface_atom] + locov.cell[0] * dx + locov.cell[1] * dy, dx, dy) for dx in [-1, 0, 1] for dy in [-1, 0, 1]]
-        mic_positions.sort(key=lambda x: np.linalg.norm(x[0] - locov.positions[lowest_adsorbate_atom]))
-        mic_x, mic_y = mic_positions[0][1:3]
+        key = lambda x: np.linalg.norm(x[0] - locov.positions[lowest_adsorbate_atom])
+        mic_positions = [(x[0], x[1], x[2], key(x)) for x in mic_positions]
+        mic_positions.sort(key=key)
+        mic_x, mic_y = (mic_positions[0])[1:3]
 
         locov_channels = [[surface_atom, 'd', 0]]
         if spinpol:
@@ -317,11 +318,12 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
 
         crystal_coord = np.linalg.solve(
-            clean.cell.T, locov.positions[surface_atom] + mic_x * locov.cell[0] + mic_y * locov.cell[1])
+            clean.cell.T, locov.positions[surface_atom] + mic_x * locov.cell[0] + mic_y * locov.cell[1]
+            - locov.positions[lowest_adsorbate_atom])
         crystal_x = int(round(crystal_coord[0]))
         crystal_y = int(round(crystal_coord[1]))
 
-        d_shift = (clean_E_d - locov_E_d)
+        d_shift = (locov_E_d - clean_E_d)
         if verbose:
             print(
                 'Surface Atom {surface_atom}, crystal coord {crystal_coord}'.format(**locals()))
