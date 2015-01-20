@@ -40,8 +40,8 @@ def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbo
             print('Non-periodic calculation')
 
     # setup interaction lattice
-    xs = [x for _, _, _, _, x, _ in adsorbates]
-    ys = [y for _, _, _, _, _, y in adsorbates]
+    xs = [x for _, _, _, x, _ in adsorbates]
+    ys = [y for _, _, _, _, y in adsorbates]
     min_x = min(xs)
     max_x = max(xs)
     min_y = min(ys)
@@ -59,12 +59,13 @@ def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbo
 
     # calculate d-band shifts based on other adsorbates
     for i, adsorbate in enumerate(adsorbates):
-        surface, orientation, molecule, site, rel_x, rel_y = adsorbate
+        print(adsorbate)
+        surface, molecule, site, rel_x, rel_y = adsorbate
         if verbose:
-            print("Metal: {surface}, orientation: ({orientation}), molecule: {molecule}, site: {site}, (X, Y) = ({rel_x}, {rel_y})".format(
+            print("Metal: {surface},  molecule: {molecule}, site: {site}, (X, Y) = ({rel_x}, {rel_y})".format(
                 **locals()))
 
-        d_shift_sum = sum(interactions[surface][orientation][molecule][site]['V'].get(x, {}).get(y, 0)
+        d_shift_sum = sum(interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0)
                           for x in range(-IR, IR) for y in range(-IR, IR))
 
         X, Y = lattice_dbands[i].shape
@@ -74,29 +75,29 @@ def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbo
                     # if True:
                     if j != i:
                         if pbc is not None:
-                            lattice_dbands[j][x % pbc[0], y % pbc[1]] += interactions[surface][orientation][molecule][site]['V'].get(x - (rel_x + IR), {}).get(y - (rel_y + IR), 0.) * \
-                                interactions[surface][orientation][molecule][
+                            lattice_dbands[j][x % pbc[0], y % pbc[1]] += interactions[surface][molecule][site]['V'].get(x - (rel_x + IR), {}).get(y - (rel_y + IR), 0.) * \
+                                interactions[surface][molecule][
                                     site]['delta_D'] / d_shift_sum
                         else:
-                            lattice_dbands[j][x, y] += interactions[surface][orientation][molecule][site]['V'].get(x - (rel_x + IR), {}).get(y - (rel_y + IR), 0.) * \
-                                interactions[surface][orientation][molecule][
+                            lattice_dbands[j][x, y] += interactions[surface][molecule][site]['V'].get(x - (rel_x + IR), {}).get(y - (rel_y + IR), 0.) * \
+                                interactions[surface][molecule][
                                     site]['delta_D'] / d_shift_sum
                     else:
                         if pbc is not None:
-                            self_int[j][x % pbc[0], y % pbc[1]] += interactions[surface][orientation][molecule][site]['V'].get(x - (rel_x + IR), {}).get(y - (rel_y + IR), 0.) * \
-                                interactions[surface][orientation][molecule][
+                            self_int[j][x % pbc[0], y % pbc[1]] += interactions[surface][molecule][site]['V'].get(x - (rel_x + IR), {}).get(y - (rel_y + IR), 0.) * \
+                                interactions[surface][molecule][
                                     site]['delta_D'] / d_shift_sum
                         else:
-                            self_int[j][x, y] += interactions[surface][orientation][molecule][site]['V'].get(x - (rel_x + IR), {}).get(y - (rel_y + IR), 0.) * \
-                                interactions[surface][orientation][molecule][
+                            self_int[j][x, y] += interactions[surface][molecule][site]['V'].get(x - (rel_x + IR), {}).get(y - (rel_y + IR), 0.) * \
+                                interactions[surface][molecule][
                                     site]['delta_D'] / d_shift_sum
 
     # calculate interaction energy
     interaction_energy = 0.
     for i, adsorbate in enumerate(adsorbates):
-        surface, orientation, molecule, site, rel_x, rel_y = adsorbate
+        surface, molecule, site, rel_x, rel_y = adsorbate
         interaction_contrib = 0.
-        d_shift_sum = sum(interactions[surface][orientation][molecule][site]['V'].get(x, {}).get(y, 0)
+        d_shift_sum = sum(interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0)
                           for x in range(-IR, IR) for y in range(-IR, IR))
         for x in range(-IR, IR):
             for y in range(-IR, IR):
@@ -108,23 +109,23 @@ def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbo
                 if pbc is not None:
                     w = self_int[i][(rel_x + x + IR) %
                                     pbc[0], (rel_y + y + IR) % pbc[1]]
-                    interaction_contrib += interactions[surface][orientation][molecule][site]['V'].get(x, {}).get(y, 0.) * \
+                    interaction_contrib += interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0.) * \
                         lattice_dbands[i][(rel_x + x + IR) % pbc[0], (rel_y + y + IR) % pbc[1]] / \
-                        (interactions[surface][orientation][molecule]
+                        (interactions[surface][molecule]
                          [site]['delta_D'] - w) / d_shift_sum
                 else:
                     w = self_int[i][x, y]
-                    interaction_contrib += interactions[surface][orientation][molecule][site]['V'].get(x, {}).get(y, 0.) * \
+                    interaction_contrib += interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0.) * \
                         lattice_dbands[i][rel_x + x + IR, rel_y + y + IR] / \
-                        (interactions[surface][orientation][molecule]
+                        (interactions[surface][molecule]
                          [site]['delta_D'] - w) / d_shift_sum
 
         #print('interaction contrib = {interaction_contrib}'.format(**locals()))
-        interaction_energy += (interactions[surface][orientation][molecule][site]['delta_E']) * \
+        interaction_energy += (interactions[surface][molecule][site]['delta_E']) * \
             interaction_contrib
 
     if verbose:
-        print('---> interaction energy {:.3f} eV.'.format(interaction_energy))
+        print('---> interaction energy {:.3f} eV.\n'.format(interaction_energy))
     return interaction_energy
 
 
