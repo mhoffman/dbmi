@@ -74,7 +74,7 @@ def extract_charge(pickle_filename, verbose=True):
         origin, cell, charge = pickle.load(infile)
 
     # convert unit cell to atomic units (bohr radii)
-    cb = cell_bohr = cell / bohr
+    cb = cell_bohr = cell / ase.units.Bohr
 
     # calculate cell volume
     volume = np.dot(np.cross(cb[0], cb[1]), cb[2])
@@ -86,7 +86,7 @@ def extract_charge(pickle_filename, verbose=True):
     voxels = np.array(charge.shape).prod()
 
     voxel_volume = volume / voxels
-    charge *= voxel_volume / Rydberg
+    charge *= voxel_volume / ase.units.Rydberg
 
     return origin, cell, charge
 
@@ -373,6 +373,8 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
         interactions[surface_name][adsorbate_name][
             site_name].update({'dipole': dipole})
+        if verbose:
+            print('dipole = {dipole} eA'.format(**locals()))
 
     # - d-band shift(s)
     adsorbate_atoms = [i for i, species in enumerate(
