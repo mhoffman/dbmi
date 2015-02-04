@@ -157,10 +157,11 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
                              clean_surface_logfile, clean_surface_dosfile,
                              locov_logfile, locov_dosfile,
                              hicov_logfile, hicov_dosfile,
+                             locov_densityfile=None,
                              verbose=False,
                              spinpol=False,
                              adsorbate_species=['C', 'H', 'O', 'N', 'F', 'S', 'Cl', 'P'],
-                             surface_tol=1.,
+                             surface_tol=.5,
                              ):
     """
         Take the resulting log files from a QuantumEspresso geometry optimization and the pickled DOS file
@@ -292,7 +293,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         locov.get_chemical_symbols()) if species not in adsorbate_species]
     max_z = locov.positions[surface_atom, 2]
     surface_atoms = [i for i, z in enumerate(
-        locov.positions[:, 2]) if abs(max_z - z) < surface_tol]
+        locov.positions[:, 2]) if abs(max_z - z) < surface_tol and i not in adsorbate_atoms]
 
     lowest_adsorbate_atom = adsorbate_atoms[np.argmin(locov.positions[adsorbate_atoms, 2])]
 
@@ -313,6 +314,9 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         if spinpol:
             locov_channels.append([surface_atom, 'd', 1])
 
+        if verbose:
+            print("  Getting DOS from {locov_dosfile} with the channels {locov_channels}.".format(**locals()))
+
         locov_energies, locov_DOS, _ = get_DOS_hilbert(
             locov_dosfile, locov_channels)
         locov_E_d, _ = get_e_w(locov_energies, locov_DOS)
@@ -327,7 +331,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         d_shift = (locov_E_d - clean_E_d)
         if verbose:
             print(
-                'Surface Atom {surface_atom}, crystal coord {crystal_coord}'.format(**locals()))
+                '  Surface Atom {surface_atom}, crystal coord {crystal_coord}'.format(**locals()))
             print(
                 "    At ({crystal_x}, {crystal_y}): {d_shift} eV".format(**locals()))
         interactions[surface_name][adsorbate_name][site_name][
