@@ -367,6 +367,13 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     interactions[surface_name][adsorbate_name][
         site_name].update({'delta_E': delta_E})
 
+    if locov_densityfile :
+        origin, cell, charge = extract_charge(locov_densityfile)
+        dipole = get_dipole(cell, charge, locov_traj)
+
+        interactions[surface_name][adsorbate_name][
+            site_name].update({'dipole': dipole})
+
     # - d-band shift(s)
     adsorbate_atoms = [i for i, species in enumerate(
         locov.get_chemical_symbols()) if species in adsorbate_species]
