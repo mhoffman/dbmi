@@ -12,6 +12,84 @@ import pickle
 import numpy as np
 import scipy.signal
 import espresso.io
+import ase.units
+
+
+def get_dipole_energy(dipole1, dipole2, distance):
+    """Calculate potential energy between two dipole, assuming
+    they are alinged in parallel. Dipole units are electron*Angstrom
+    and energy is eV.
+
+    Potential energy between two dipoles:
+    $$
+    U({\bf p_1}, {\bf p_2}, {\bf \hat r}) = - \frac{{\bf p_1}\cdot {\bf p_2} - 3 ({\bf p_1} \cdot {\bf \hat r} ) (\bf p_2 \cdot \hat{r})}{ 4 \pi \epsilon_{0} r^{3}}
+    $$
+
+    which is for the simple case of two parallel dipoles here:
+
+    $$
+    U = \frac{p_{1}p_{2}}{2 \pi \epsilon_0 r^3}
+    $$
+
+
+
+    """
+    return (dipole1 * ase.units.Angstrom) * (dipole2 * ase.units.Angstrom) \
+        / 2 / np.pi / (distance * ase.units.Angstrom) ** 3 \
+        / ase.units._eps0 / ase.units.C * ase.units.m
+
+
+def get_dipole(cell, charge, geom):
+    ion_center = np.zeros((3, ))
+    e_center = np.zeros((3, ))
+    e_charge = 0
+    ion_charge = 0
+    X, Y, Z = charge.shape
+    fX, fY, fZ = float(X), float(Y), float(Z)
+    c0, c1, c2 = cell
+
+    for xi in range(X):
+        for yi in range(Y):
+            for zi in range(Z):
+                x, y, z = xi / fZ, yi / fY, zi / fZ
+                r = xi * c0 / fX + yi * c1 / fY + zi * c2 / fZ
+                e_center += charge[xi, yi, zi] * r
+                e_charge += charge[xi, yi, zi]
+
+    #e_center /= e_charge
+
+    for atom in geom:
+
+        ion_contrib = atom.position * pseudo_charges[atom.symbol]
+        ion_center += ion_contrib
+        ion_charge += pseudo_charges[atom.symbol]
+
+    #ion_center /= ion_charge
+
+    return (ion_center - e_center)[-1]
+
+
+def extract_charge(pickle_filename, verbose=True):
+    with open(pickle_filename) as infile:
+        origin, cell, charge = pickle.load(infile)
+
+    # convert unit cell to atomic units (bohr radii)
+    cb = cell_bohr = cell / bohr
+
+    # calculate cell volume
+    volume = np.dot(np.cross(cb[0], cb[1]), cb[2])
+
+    # clip copies from charge density
+    charge = charge[:-1, :-1, :-1]
+    #charge = charge[1:, 1:, 1:]
+
+    voxels = np.array(charge.shape).prod()
+
+    voxel_volume = volume / voxels
+    charge *= voxel_volume / Rydberg
+
+    return origin, cell, charge
+
 
 def merge(dict1, dict2):
     """Recursively merge two dictionaries
@@ -25,17 +103,18 @@ def merge(dict1, dict2):
                 # If one of the values is not a dict, you can't continue merging it.
                 # Value from second dict overrides one in first and we move on.
                 yield (k, dict2[k])
-                # Alternatively, replace this with exception raiser to alert you of value conflicts
+                # Alternatively, replace this with exception raiser to alert
+                # you of value conflicts
         elif k in dict1:
             yield (k, dict1[k])
         else:
             yield (k, dict2[k])
 
 
-def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbose=False):
+def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbose=False, comment=''):
     if verbose:
         if pbc:
-            print('Unit cell Size ({}x{})'.format(pbc[0], pbc[1]))
+            print('\n\nUnit cell Size ({}x{})'.format(pbc[0], pbc[1]))
         else:
             print('Non-periodic calculation')
 
@@ -125,7 +204,8 @@ def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbo
             interaction_contrib
 
     if verbose:
-        print('---> interaction energy {:.3f} eV.\n'.format(interaction_energy))
+        print(
+            '{comment} ---> interaction energy {interaction_energy:.3f} eV.\n'.format(**locals()))
     return interaction_energy
 
 
@@ -284,7 +364,8 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         print("Warning: binding energy shift ({delta_E}) seems very large.".format(
             **locals()))
 
-    interactions[surface_name][adsorbate_name][site_name].update({'delta_E': delta_E})
+    interactions[surface_name][adsorbate_name][
+        site_name].update({'delta_E': delta_E})
 
     # - d-band shift(s)
     adsorbate_atoms = [i for i, species in enumerate(
@@ -295,17 +376,20 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     surface_atoms = [i for i, z in enumerate(
         locov.positions[:, 2]) if abs(max_z - z) < surface_tol and i not in adsorbate_atoms]
 
-    lowest_adsorbate_atom = adsorbate_atoms[np.argmin(locov.positions[adsorbate_atoms, 2])]
-
+    lowest_adsorbate_atom = adsorbate_atoms[
+        np.argmin(locov.positions[adsorbate_atoms, 2])]
 
     if verbose:
-        print('Lowest Adsorbate Atom {lowest_adsorbate_atom}'.format(**locals()))
+        print(
+            'Lowest Adsorbate Atom {lowest_adsorbate_atom}'.format(**locals()))
         print('Surface Atoms {surface_atoms}'.format(**locals()))
 
     for surface_atom in surface_atoms:
         # get the offset belonging to the Minimum Image Convention
-        mic_positions = [(locov.positions[surface_atom] + locov.cell[0] * dx + locov.cell[1] * dy, dx, dy) for dx in [-1, 0, 1] for dy in [-1, 0, 1]]
-        key = lambda x: np.linalg.norm(x[0] - locov.positions[lowest_adsorbate_atom])
+        mic_positions = [(locov.positions[surface_atom] + locov.cell[0] * dx +
+                          locov.cell[1] * dy, dx, dy) for dx in [-1, 0, 1] for dy in [-1, 0, 1]]
+        key = lambda x: np.linalg.norm(
+            x[0] - locov.positions[lowest_adsorbate_atom])
         mic_positions = [(x[0], x[1], x[2], key(x)) for x in mic_positions]
         mic_positions.sort(key=key)
         mic_x, mic_y = (mic_positions[0])[1:3]
@@ -321,9 +405,9 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
             locov_dosfile, locov_channels)
         locov_E_d, _ = get_e_w(locov_energies, locov_DOS)
 
-
         crystal_coord = np.linalg.solve(
-            clean.cell.T, locov.positions[surface_atom] + mic_x * locov.cell[0] + mic_y * locov.cell[1]
+            clean.cell.T, locov.positions[
+                surface_atom] + mic_x * locov.cell[0] + mic_y * locov.cell[1]
             - locov.positions[lowest_adsorbate_atom])
         crystal_x = int(round(crystal_coord[0]))
         crystal_y = int(round(crystal_coord[1]))
