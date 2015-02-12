@@ -3,6 +3,7 @@
 __version__ = "0.0.1"
 VERSION = __version__
 
+import os.path
 
 import pprint
 import collections
@@ -13,6 +14,8 @@ import numpy as np
 import scipy.signal
 import espresso.io
 import ase.units
+
+import dbmi.util
 
 
 def get_dipole_energy(dipole1, dipole2, distance):
@@ -39,37 +42,38 @@ def get_dipole_energy(dipole1, dipole2, distance):
         / ase.units._eps0 / ase.units.C * ase.units.m
 
 
-def get_dipole(cell, charge, geom):
+def get_dipole(cell, charge, geom, verbose=False):
     ion_center = np.zeros((3, ))
     e_center = np.zeros((3, ))
-    e_charge = 0
     ion_charge = 0
-    X, Y, Z = charge.shape
-    fX, fY, fZ = float(X), float(Y), float(Z)
-    c0, c1, c2 = cell
+    e_charge = charge.sum()
 
-    for xi in range(X):
-        for yi in range(Y):
-            for zi in range(Z):
-                x, y, z = xi / fZ, yi / fY, zi / fZ
-                r = xi * c0 / fX + yi * c1 / fY + zi * c2 / fZ
-                e_center += charge[xi, yi, zi] * r
-                e_charge += charge[xi, yi, zi]
+    if verbose:
+        print("get_dipole cell = {cell}".format(**locals()))
 
-    #e_center /= e_charge
+    X, Y, Z = map(np.complex, charge.shape)
+    dx, dy, dz =  map(lambda x: 1./x, charge.shape)
+
+    XYZ = np.column_stack(map(lambda x: x.flatten(), np.mgrid[0.:1.:dx, 0.:1.:dy, 0.:1.:dz]))
+    e_center = - np.dot(cell.T, np.sum(XYZ * charge.flatten()[:, None], axis=0) / 1.)
+
+    if verbose:
+        print('    E-center   {e_center} [A, A, A]'.format(**locals()))
+        print('    Total electron charge {charge_sum} e'.format(charge_sum=charge.sum()))
 
     for atom in geom:
-
-        ion_contrib = atom.position * pseudo_charges[atom.symbol]
+        ion_contrib = atom.position * dbmi.util.pseudo_charges[atom.symbol]
         ion_center += ion_contrib
-        ion_charge += pseudo_charges[atom.symbol]
+        ion_charge += dbmi.util.pseudo_charges[atom.symbol]
 
-    #ion_center /= ion_charge
+    if verbose:
+        print('    Ion-center {ion_center} [A, A, A]'.format(**locals()))
+        print('    Total ion charge {ion_charge} e'.format(**locals()))
 
-    return (ion_center - e_center)[-1]
+    return (ion_center + e_center)[-1]
 
 
-def extract_charge(pickle_filename, verbose=True):
+def extract_charge(pickle_filename, verbose=True, clip=True):
     with open(pickle_filename) as infile:
         origin, cell, charge = pickle.load(infile)
 
@@ -80,7 +84,8 @@ def extract_charge(pickle_filename, verbose=True):
     volume = np.dot(np.cross(cb[0], cb[1]), cb[2])
 
     # clip copies from charge density
-    charge = charge[:-1, :-1, :-1]
+    if clip:
+        charge = charge[:-1, :-1, :-1]
     #charge = charge[1:, 1:, 1:]
 
     voxels = np.array(charge.shape).prod()
@@ -271,12 +276,26 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     """
 
+
+    if adsorbate_species is None:
+        adsorbate_species = set(ase.data.chemical_symbols) - set(['Rh', 'Pt', 'Pd', 'Au', 'Ru'])
+
     interactions = {}
     interactions.update({surface_name: {}})
     interactions[surface_name].update({adsorbate_name: {}})
     interactions[surface_name][adsorbate_name].update({site_name: {}})
-
     interactions[surface_name][adsorbate_name][site_name].update({'V': {}})
+
+    # store filepaths to
+    interactions[surface_name][adsorbate_name][site_name].update({
+        '_clean_surface_logfile': os.path.realpath(clean_surface_logfile),
+        '_clean_surface_dosfile': os.path.realpath(clean_surface_dosfile),
+        '_locov_logfile': os.path.realpath(locov_logfile),
+        '_locov_dosfile': os.path.realpath(locov_dosfile),
+        '_hicov_logfile': os.path.realpath(hicov_logfile),
+        '_hicov_dosfile': os.path.realpath(hicov_dosfile),
+        '_locov_densityfile': os.path.realpath(locov_densityfile),
+    })
 
     # collect clean surface info
     # - energy
@@ -291,6 +310,9 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     clean_channels = [[surface_atom, 'd', 0]]
     if spinpol:
         clean_channels.append([surface_atom, 'd', 1])
+
+    # save cell geometry
+    interactions[surface_name]['_cell']  = clean.cell.tolist()
 
     # - reference d-band center
     clean_energies, clean_DOS, _ = get_DOS_hilbert(
@@ -318,6 +340,8 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     slab_atoms = [i for i, species in enumerate(
         hicov.get_chemical_symbols()) if species not in adsorbate_species]
     surface_atom = slab_atoms[np.argmax(hicov.positions[slab_atoms, 2])]
+
+
 
     if verbose:
         print('Surface Atom {surface_atom}'.format(**locals()))
@@ -359,17 +383,18 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     if delta_E < 0.:
         print(
-            "Warning: binding energy shift ({delta_E} is negative.".format(**locals()))
+            "Warning: binding energy shift ({delta_E} eV) is negative. Indicates strongly attractive interaction.".format(**locals()))
     elif delta_E > 2.:
-        print("Warning: binding energy shift ({delta_E}) seems very large.".format(
+        print("Warning: binding energy shift ({delta_E} eV) seems very large.".format(
             **locals()))
 
     interactions[surface_name][adsorbate_name][
         site_name].update({'delta_E': delta_E})
 
+
     if locov_densityfile :
-        origin, cell, charge = extract_charge(locov_densityfile)
-        dipole = get_dipole(cell, charge, locov_traj)
+        origin, cell, charge = extract_charge(locov_densityfile, clip=False)
+        dipole = get_dipole(cell, charge, locov)
 
         interactions[surface_name][adsorbate_name][
             site_name].update({'dipole': dipole})
