@@ -210,6 +210,40 @@ def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbo
         interaction_energy += (interactions[surface][molecule][site]['delta_E']) * \
             interaction_contrib
 
+    # calculate dipole interaction energy
+    ES_CUTOFF = 3
+    ES_ENERGY = 0.
+
+    for i, adsorbate1 in enumerate(adsorbates):
+        for j, adsorbate2 in enumerate(adsorbates):
+            surface1, molecule1, site1, rel_x1, rel_y1 = adsorbate1
+            surface2, molecule2, site2, rel_x2, rel_y2 = adsorbate2
+
+            cell = np.array(interactions[surface1]['_cell'])
+
+            for x in range(-ES_CUTOFF, ES_CUTOFF):
+                for y in range(-ES_CUTOFF, ES_CUTOFF):
+                    if adsorbate1 != adsorbate2 or x != 0 or y != 0:
+                        # FIX BUG HERE !!!!!!!!!!
+                        d = np.array([pbc[0] * x, pbc[1] * y, 0])
+                        sp1 = np.array(interactions[surface1][molecule1][site1][
+                                       'site_pos']) + np.array([rel_x1, rel_y1, 0.])
+                        sp2 = np.array(interactions[surface2][molecule2][site2][
+                                       'site_pos']) + np.array([rel_x2, rel_y2, 0.])
+                        r = np.linalg.norm(np.dot(d + sp1 - sp2, cell))
+
+                        dp1 = np.array(
+                            interactions[surface1][molecule1][site1]['dipole'])
+                        dp2 = np.array(
+                            interactions[surface2][molecule2][site2]['dipole'])
+
+                        dp_energy = get_dipole_energy(dp1, dp2, r)
+                        ES_ENERGY += dp_energy / 2
+                        #print('Distance {r} {dp_energy} eV, ({d} {sp1} {sp2})'.format(**locals()))
+
+    #print('CELL {cell}'.format(**locals()))
+    print('Electrostatic contribution {ES_ENERGY}'.format(**locals()))
+
     if verbose:
         print(
             '{comment} ---> interaction energy {interaction_energy:.3f} eV.\n'.format(**locals()))
@@ -248,7 +282,8 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
                              locov_densityfile=None,
                              verbose=False,
                              spinpol=False,
-                             adsorbate_species=['C', 'H', 'O', 'N', 'F', 'S', 'Cl', 'P'],
+                             adsorbate_species=[
+                                 'C', 'H', 'O', 'N', 'F', 'S', 'Cl', 'P'],
                              surface_tol=.5,
                              ):
     """
@@ -400,7 +435,6 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     interactions[surface_name][adsorbate_name][
         site_name].update({'delta_E': delta_E})
 
-
     if locov_densityfile :
         origin, cell, charge = extract_charge(locov_densityfile, clip=True)
         dipole = get_dipole(cell, charge, locov)
@@ -443,7 +477,8 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
             locov_channels.append([surface_atom, 'd', 1])
 
         if verbose:
-            print("  Getting DOS from {locov_dosfile} with the channels {locov_channels}.".format(**locals()))
+            print("  Getting DOS from {locov_dosfile} with the channels {locov_channels}.".format(
+                **locals()))
 
         locov_energies, locov_DOS, _ = get_DOS_hilbert(
             locov_dosfile, locov_channels)
