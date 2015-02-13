@@ -48,6 +48,8 @@ def get_dipole(cell, charge, geom, verbose=False):
     ion_charge = 0
     e_charge = charge.sum()
 
+    cell = geom.cell
+
     if verbose:
         print("get_dipole cell = {cell}".format(**locals()))
 
@@ -242,6 +244,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
                              clean_surface_logfile, clean_surface_dosfile,
                              locov_logfile, locov_dosfile,
                              hicov_logfile, hicov_dosfile,
+                             site_pos=[0., 0., 0.],
                              locov_densityfile=None,
                              verbose=False,
                              spinpol=False,
@@ -273,6 +276,8 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         :type hicov_logfile: str
         :param hicov_dosfile: The path of a pickle file storing the (projected) density of states of the isolated adsorbate.
         :type hicov_dosfile: str
+        :param site_pos: The position of the surface site in relative coordinate of the clean surface unit cell
+        :type site_pos: iterable of 3 floats in [0, 1)
 
     """
 
@@ -285,6 +290,8 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     interactions[surface_name].update({adsorbate_name: {}})
     interactions[surface_name][adsorbate_name].update({site_name: {}})
     interactions[surface_name][adsorbate_name][site_name].update({'V': {}})
+    interactions[surface_name][adsorbate_name][site_name].update({'site_pos': site_pos})
+
 
     # store filepaths to
     interactions[surface_name][adsorbate_name][site_name].update({
@@ -294,7 +301,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         '_locov_dosfile': os.path.realpath(locov_dosfile),
         '_hicov_logfile': os.path.realpath(hicov_logfile),
         '_hicov_dosfile': os.path.realpath(hicov_dosfile),
-        '_locov_densityfile': os.path.realpath(locov_densityfile),
+        '_locov_densityfile': os.path.realpath(locov_densityfile) if locov_densityfile else None ,
     })
 
     # collect clean surface info
@@ -305,6 +312,8 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     clean_energy = clean.get_calculator().get_potential_energy()
     if verbose:
         print("Clean Surface Energy {clean_energy}".format(**locals()))
+        print(interactions[surface_name][adsorbate_name][site_name])
+
     clean_cell = clean.cell
     surface_atom = np.argmax(clean.positions[:, 2])
     clean_channels = [[surface_atom, 'd', 0]]
@@ -379,11 +388,11 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         print("Low Cov Energy {locov_energy}, ({locov_x:.2f}x{locov_y:.2f})".format(
             **locals()))
 
-    delta_E = (hicov_binding_energy - locov_binding_energy)
+    delta_E = hicov_binding_energy - locov_binding_energy
 
     if delta_E < 0.:
         print(
-            "Warning: binding energy shift ({delta_E} eV) is negative. Indicates strongly attractive interaction.".format(**locals()))
+            "Warning: binding energy shift ({delta_E} eV) is negative. Indicates attractive interaction.".format(**locals()))
     elif delta_E > 2.:
         print("Warning: binding energy shift ({delta_E} eV) seems very large.".format(
             **locals()))
@@ -393,12 +402,13 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
 
     if locov_densityfile :
-        origin, cell, charge = extract_charge(locov_densityfile, clip=False)
+        origin, cell, charge = extract_charge(locov_densityfile, clip=True)
         dipole = get_dipole(cell, charge, locov)
 
         interactions[surface_name][adsorbate_name][
             site_name].update({'dipole': dipole})
         if verbose:
+            print('==> DEBUG DENSITY-FILE: {locov_densityfile}\n\tLOG-FILE: {locov_logfile}\n\tGEOM: {locov}\n\tCELL:{cell}\n\tCHARGE-SHAPE: {charge.shape}\n\t'.format(**locals()))
             print('dipole = {dipole} eA'.format(**locals()))
 
     # - d-band shift(s)
