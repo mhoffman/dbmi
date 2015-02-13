@@ -318,7 +318,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         :param surface_name: A descriptive handle for the substrate surface.
         :type surface_name: str
         :param adsorbate_name: A descriptive handle for the interacting adsorbate.
-        :type surface_name: str
+        :type adsorbate_name: str
         :param site_name: A name for the surface adsorption site.
         :type site_name: str
         :param clean_surface_logfile: The path of a QuantumEspresso logfile of the clean (primitive) surface slab.
