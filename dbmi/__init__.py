@@ -123,7 +123,7 @@ def merge(dict1, dict2):
             yield (k, dict2[k])
 
 
-def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=3, pbc=None, verbose=False, comment=''):
+def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=50, pbc=None, verbose=False, comment='', dipole_contribution=False):
     """Calculate the adsorbate-adsorbate interaction based in d-band perturbations and electrostatic dipoles
     of isolated adsorbates.
 
@@ -134,7 +134,7 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=3, pbc=None,
     :param DR: cut-off radius for calculating the d-band mediated interaction (default: 3).
     :type DR: int
     :param ER: cut-off radius for electrostatic dipole interaction contributions (default: 4).
-    :type DR: int
+    :type ER: int
     :param verbose: Flag to control whether status messages are printed during the calculation.
     :type verbose: bool
     :param comment: Comment string that appear be in the resulting (verbose) output.
@@ -168,7 +168,8 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=3, pbc=None,
 
     # calculate d-band shifts based on other adsorbates
     for i, adsorbate in enumerate(adsorbates):
-        print(adsorbate)
+        if verbose:
+            print(adsorbate)
         surface, molecule, site, rel_x, rel_y = adsorbate
         if verbose:
             print("Metal: {surface},  molecule: {molecule}, site: {site}, (X, Y) = ({rel_x}, {rel_y})".format(
@@ -205,6 +206,7 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=3, pbc=None,
     interaction_energy = 0.
     for i, adsorbate in enumerate(adsorbates):
         surface, molecule, site, rel_x, rel_y = adsorbate
+        cell = np.array(interactions[surface]['_cell'])
         interaction_contrib = 0.
         d_shift_sum = sum(interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0)
                           for x in range(-DR, DR) for y in range(-DR, DR))
@@ -230,12 +232,27 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=3, pbc=None,
                          [site]['delta_D'] - w) / d_shift_sum
 
         #print('interaction contrib = {interaction_contrib}'.format(**locals()))
-        interaction_energy += (interactions[surface][molecule][site]['delta_E']) * \
-            interaction_contrib
+        if dipole_contribution:
+            dipole_self_interaction = 0.
+            for x in range(-ER, ER):
+                for y in range(-ER, ER):
+                    if x or y:
+                        dp = interactions[surface][molecule][site]['dipole']
+                        d = np.linalg.norm(np.dot(np.array([x,  y, 0]), cell))
+                        dipole_energy = get_dipole_energy(dp, dp, d)
+                        dipole_self_interaction += dipole_energy
+                        #print("Dipole self-contribution {dp} eA, {d} A, {dipole_energy} eV".format(**locals()))
+
+            dband_delta_E = interactions[surface][molecule][site]['delta_E'] - dipole_self_interaction
+            if verbose:
+                print('Dipole self-interaction {molecule}@{site} {dband_delta_E} eV.'.format(**locals()))
+        else:
+            dband_delta_E = interactions[surface][molecule][site]['delta_E']
+
+        interaction_energy += dband_delta_E  * interaction_contrib
 
     # calculate dipole interaction energy
     ES_ENERGY = 0.
-
     for i, adsorbate1 in enumerate(adsorbates):
         for j, adsorbate2 in enumerate(adsorbates):
             surface1, molecule1, site1, rel_x1, rel_y1 = adsorbate1
@@ -260,13 +277,19 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=3, pbc=None,
                             interactions[surface2][molecule2][site2]['dipole'])
 
                         dp_energy = get_dipole_energy(dp1, dp2, r)
-                        ES_ENERGY += dp_energy / 2
+                        ES_ENERGY += dp_energy / 1
                         #print('Distance {r} {dp_energy} eV, ({d} {sp1} {sp2})'.format(**locals()))
 
     #print('CELL {cell}'.format(**locals()))
-    print('Electrostatic contribution {ES_ENERGY}'.format(**locals()))
-
     if verbose:
+        print('Total electrostatic contribution {ES_ENERGY}'.format(**locals()))
+
+    if dipole_contribution:
+        interaction_energy += ES_ENERGY
+        
+        
+
+    if comment:
         print(
             '{comment} ---> interaction energy {interaction_energy:.3f} eV.\n'.format(**locals()))
     return interaction_energy
