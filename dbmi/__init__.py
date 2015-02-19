@@ -43,6 +43,11 @@ def get_dipole_energy(dipole1, dipole2, distance):
 
 
 def get_dipole(cell, charge, geom, verbose=False):
+    """
+        Extract the dipole in the z-direction (3rd axis).
+
+
+    """
     ion_center = np.zeros((3, ))
     e_center = np.zeros((3, ))
     ion_charge = 0
@@ -118,7 +123,25 @@ def merge(dict1, dict2):
             yield (k, dict2[k])
 
 
-def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbose=False, comment=''):
+def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=3, pbc=None, verbose=False, comment=''):
+    """Calculate the adsorbate-adsorbate interaction based in d-band perturbations and electrostatic dipoles
+    of isolated adsorbates.
+
+    :param interaction: Data extracted from isolated adsorbates specifying the d-band perturbuation and electrostatic dipole
+    :type interaction: dict
+    :param adsorbates: List of tuple encoding the relative positions of adsorbates on high-symmetry surface sites. If tuple is of the form (surface, adsorbate, site, rel_x, rel_y).
+    :type adsorbates: list
+    :param DR: cut-off radius for calculating the d-band mediated interaction (default: 3).
+    :type DR: int
+    :param ER: cut-off radius for electrostatic dipole interaction contributions (default: 4).
+    :type DR: int
+    :param verbose: Flag to control whether status messages are printed during the calculation.
+    :type verbose: bool
+    :param comment: Comment string that appear be in the resulting (verbose) output.
+    :type comment: str
+
+    """
+
     if verbose:
         if pbc:
             print('\n\nUnit cell Size ({}x{})'.format(pbc[0], pbc[1]))
@@ -136,11 +159,11 @@ def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbo
     lattice = np.array
     # the d-bands shifts the i-th atom see, due to all other atoms
     lattice_dbands = [np.zeros(
-        (max_x - min_x + 2 * IR, max_y - min_x + 2 * IR)) for _ in range(len(adsorbates))]
+        (max_x - min_x + 2 * DR, max_y - min_x + 2 * DR)) for _ in range(len(adsorbates))]
 
     # the d-bands shifts to due the i-th atom
     # so that we can subtract later from the maximum
-    self_int = [np.zeros((max_x - min_x + 2 * IR, max_y - min_x + 2 * IR))
+    self_int = [np.zeros((max_x - min_x + 2 * DR, max_y - min_x + 2 * DR))
                 for _ in range(len(adsorbates))]
 
     # calculate d-band shifts based on other adsorbates
@@ -153,7 +176,7 @@ def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbo
                 **locals()))
 
         d_shift_sum = sum(interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0)
-                          for x in range(-IR, IR) for y in range(-IR, IR))
+                          for x in range(-DR, DR) for y in range(-DR, DR))
 
         X, Y = lattice_dbands[i].shape
         for x in range(X):
@@ -162,20 +185,20 @@ def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbo
                     # if True:
                     if j != i:
                         if pbc is not None:
-                            lattice_dbands[j][x % pbc[0], y % pbc[1]] += interactions[surface][molecule][site]['V'].get(x - (rel_x + IR), {}).get(y - (rel_y + IR), 0.) * \
+                            lattice_dbands[j][x % pbc[0], y % pbc[1]] += interactions[surface][molecule][site]['V'].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
                                 interactions[surface][molecule][
                                     site]['delta_D'] / d_shift_sum
                         else:
-                            lattice_dbands[j][x, y] += interactions[surface][molecule][site]['V'].get(x - (rel_x + IR), {}).get(y - (rel_y + IR), 0.) * \
+                            lattice_dbands[j][x, y] += interactions[surface][molecule][site]['V'].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
                                 interactions[surface][molecule][
                                     site]['delta_D'] / d_shift_sum
                     else:
                         if pbc is not None:
-                            self_int[j][x % pbc[0], y % pbc[1]] += interactions[surface][molecule][site]['V'].get(x - (rel_x + IR), {}).get(y - (rel_y + IR), 0.) * \
+                            self_int[j][x % pbc[0], y % pbc[1]] += interactions[surface][molecule][site]['V'].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
                                 interactions[surface][molecule][
                                     site]['delta_D'] / d_shift_sum
                         else:
-                            self_int[j][x, y] += interactions[surface][molecule][site]['V'].get(x - (rel_x + IR), {}).get(y - (rel_y + IR), 0.) * \
+                            self_int[j][x, y] += interactions[surface][molecule][site]['V'].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
                                 interactions[surface][molecule][
                                     site]['delta_D'] / d_shift_sum
 
@@ -185,25 +208,25 @@ def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbo
         surface, molecule, site, rel_x, rel_y = adsorbate
         interaction_contrib = 0.
         d_shift_sum = sum(interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0)
-                          for x in range(-IR, IR) for y in range(-IR, IR))
-        for x in range(-IR, IR):
-            for y in range(-IR, IR):
+                          for x in range(-DR, DR) for y in range(-DR, DR))
+        for x in range(-DR, DR):
+            for y in range(-DR, DR):
 
-                #print('rel_x {rel_x}, IR {IR}, x {x}, rel_y {rel_y}, IR {IR}, y {y}'.format(**locals()))
+                #print('rel_x {rel_x}, DR {DR}, x {x}, rel_y {rel_y}, DR {DR}, y {y}'.format(**locals()))
 
                 w = 0
 
                 if pbc is not None:
-                    w = self_int[i][(rel_x + x + IR) %
-                                    pbc[0], (rel_y + y + IR) % pbc[1]]
+                    w = self_int[i][(rel_x + x + DR) %
+                                    pbc[0], (rel_y + y + DR) % pbc[1]]
                     interaction_contrib += interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0.) * \
-                        lattice_dbands[i][(rel_x + x + IR) % pbc[0], (rel_y + y + IR) % pbc[1]] / \
+                        lattice_dbands[i][(rel_x + x + DR) % pbc[0], (rel_y + y + DR) % pbc[1]] / \
                         (interactions[surface][molecule]
                          [site]['delta_D'] - w) / d_shift_sum
                 else:
                     w = self_int[i][x, y]
                     interaction_contrib += interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0.) * \
-                        lattice_dbands[i][rel_x + x + IR, rel_y + y + IR] / \
+                        lattice_dbands[i][rel_x + x + DR, rel_y + y + DR] / \
                         (interactions[surface][molecule]
                          [site]['delta_D'] - w) / d_shift_sum
 
@@ -212,7 +235,6 @@ def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbo
             interaction_contrib
 
     # calculate dipole interaction energy
-    ES_CUTOFF = 3
     ES_ENERGY = 0.
 
     for i, adsorbate1 in enumerate(adsorbates):
@@ -222,8 +244,8 @@ def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbo
 
             cell = np.array(interactions[surface1]['_cell'])
 
-            for x in range(-ES_CUTOFF, ES_CUTOFF):
-                for y in range(-ES_CUTOFF, ES_CUTOFF):
+            for x in range(-ER, ER):
+                for y in range(-ER, ER):
                     if adsorbate1 != adsorbate2 or x != 0 or y != 0:
                         # FIX BUG HERE !!!!!!!!!!
                         d = np.array([pbc[0] * x, pbc[1] * y, 0])
@@ -298,7 +320,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         :param surface_name: A descriptive handle for the substrate surface.
         :type surface_name: str
         :param adsorbate_name: A descriptive handle for the interacting adsorbate.
-        :type surface_name: str
+        :type adsorbate_name: str
         :param site_name: A name for the surface adsorption site.
         :type site_name: str
         :param clean_surface_logfile: The path of a QuantumEspresso logfile of the clean (primitive) surface slab.
