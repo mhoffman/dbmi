@@ -145,7 +145,8 @@ def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbo
 
     # calculate d-band shifts based on other adsorbates
     for i, adsorbate in enumerate(adsorbates):
-        print(adsorbate)
+        if verbose:
+            print(adsorbate)
         surface, molecule, site, rel_x, rel_y = adsorbate
         if verbose:
             print("Metal: {surface},  molecule: {molecule}, site: {site}, (X, Y) = ({rel_x}, {rel_y})".format(
@@ -242,7 +243,8 @@ def calculate_interaction_energy(interactions, adsorbates, IR=4, pbc=None, verbo
                         #print('Distance {r} {dp_energy} eV, ({d} {sp1} {sp2})'.format(**locals()))
 
     #print('CELL {cell}'.format(**locals()))
-    print('Electrostatic contribution {ES_ENERGY}'.format(**locals()))
+    if verbose:
+        print('Electrostatic contribution {ES_ENERGY}'.format(**locals()))
 
     if verbose:
         print(
@@ -327,7 +329,6 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     interactions[surface_name][adsorbate_name][site_name].update({'V': {}})
     interactions[surface_name][adsorbate_name][site_name].update({'site_pos': site_pos})
 
-
     # store filepaths to
     interactions[surface_name][adsorbate_name][site_name].update({
         '_clean_surface_logfile': os.path.realpath(clean_surface_logfile),
@@ -364,6 +365,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     clean_E_d, _ = get_e_w(clean_energies, clean_DOS)
     if verbose:
         print('clean d-band position {clean_E_d}'.format(**locals()))
+        print('clean surface total energy {clean_energy} eV.'.format(**locals()))
 
     # collect high coverage surface info
     # - energy
@@ -437,7 +439,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     if locov_densityfile :
         origin, cell, charge = extract_charge(locov_densityfile, clip=True)
-        dipole = get_dipole(cell, charge, locov)
+        dipole = get_dipole(cell, charge, hicov)
 
         interactions[surface_name][adsorbate_name][
             site_name].update({'dipole': dipole})
