@@ -18,6 +18,11 @@ import ase.units
 import dbmi.util
 
 
+import joblib
+import tempfile
+
+memory = joblib.Memory(cachedir=tempfile.mkdtemp(), verbose=0)
+
 def get_dipole_energy(dipole1, dipole2, distance):
     """Calculate potential energy between two dipole, assuming
     they are alinged in parallel. Dipole units are electron*Angstrom
@@ -42,7 +47,7 @@ def get_dipole_energy(dipole1, dipole2, distance):
         / ase.units._eps0 / ase.units.C * ase.units.m
 
 
-def get_dipole(cell, charge, geom, verbose=False):
+def get_dipole(charge, geom, verbose=False):
     """
         Extract the dipole in the z-direction (3rd axis).
 
@@ -123,7 +128,7 @@ def merge(dict1, dict2):
             yield (k, dict2[k])
 
 
-def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=3, pbc=None, verbose=False, comment=''):
+def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=25, pbc=None, verbose=False, comment='', dipole_contribution=False):
     """Calculate the adsorbate-adsorbate interaction based in d-band perturbations and electrostatic dipoles
     of isolated adsorbates.
 
@@ -134,7 +139,7 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=3, pbc=None,
     :param DR: cut-off radius for calculating the d-band mediated interaction (default: 3).
     :type DR: int
     :param ER: cut-off radius for electrostatic dipole interaction contributions (default: 4).
-    :type DR: int
+    :type ER: int
     :param verbose: Flag to control whether status messages are printed during the calculation.
     :type verbose: bool
     :param comment: Comment string that appear be in the resulting (verbose) output.
@@ -168,8 +173,6 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=3, pbc=None,
 
     # calculate d-band shifts based on other adsorbates
     for i, adsorbate in enumerate(adsorbates):
-        if verbose:
-            print(adsorbate)
         surface, molecule, site, rel_x, rel_y = adsorbate
         if verbose:
             print("Metal: {surface},  molecule: {molecule}, site: {site}, (X, Y) = ({rel_x}, {rel_y})".format(
@@ -206,6 +209,7 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=3, pbc=None,
     interaction_energy = 0.
     for i, adsorbate in enumerate(adsorbates):
         surface, molecule, site, rel_x, rel_y = adsorbate
+        cell = np.array(interactions[surface]['_cell'])
         interaction_contrib = 0.
         d_shift_sum = sum(interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0)
                           for x in range(-DR, DR) for y in range(-DR, DR))
@@ -231,12 +235,20 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=3, pbc=None,
                          [site]['delta_D'] - w) / d_shift_sum
 
         #print('interaction contrib = {interaction_contrib}'.format(**locals()))
-        interaction_energy += (interactions[surface][molecule][site]['delta_E']) * \
-            interaction_contrib
+        if dipole_contribution:
+            dp = interactions[surface][molecule][site]['dipole']
+            dipole_self_interaction = dp**2 * calculate_periodic_dipole_interaction(1., cell, ER)
+
+            dband_delta_E = interactions[surface][molecule][site]['delta_E'] - dipole_self_interaction
+            if verbose:
+                print('Dipole self-interaction {molecule}@{site} {dipole_self_interaction: .3f} eV (Dipole {dp: .3f} eA). d-Band energy {dband_delta_E: .3f}.'.format(**locals()))
+        else:
+            dband_delta_E = interactions[surface][molecule][site]['delta_E']
+
+        interaction_energy += dband_delta_E  * interaction_contrib
 
     # calculate dipole interaction energy
     ES_ENERGY = 0.
-
     for i, adsorbate1 in enumerate(adsorbates):
         for j, adsorbate2 in enumerate(adsorbates):
             surface1, molecule1, site1, rel_x1, rel_y1 = adsorbate1
@@ -261,17 +273,34 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=3, pbc=None,
                             interactions[surface2][molecule2][site2]['dipole'])
 
                         dp_energy = get_dipole_energy(dp1, dp2, r)
-                        ES_ENERGY += dp_energy / 2
+                        ES_ENERGY += dp_energy / 1
                         #print('Distance {r} {dp_energy} eV, ({d} {sp1} {sp2})'.format(**locals()))
 
     #print('CELL {cell}'.format(**locals()))
     if verbose:
-        print('Electrostatic contribution {ES_ENERGY}'.format(**locals()))
+        print('Total electrostatic contribution {ES_ENERGY: .3f}'.format(**locals()))
 
-    if verbose:
+    if dipole_contribution:
+        interaction_energy += ES_ENERGY
+        
+        
+
+    if comment:
         print(
             '{comment} ---> interaction energy {interaction_energy:.3f} eV.\n'.format(**locals()))
     return interaction_energy
+
+
+@memory.cache
+def calculate_periodic_dipole_interaction(dp, cell, ER):
+    dipole_self_interaction = 0.
+    for x in range(-ER, ER):
+        for y in range(-ER, ER):
+            if x or y:
+                d = float(np.linalg.norm(np.dot(np.array([x,  y, 0]), cell)))
+                dipole_energy = get_dipole_energy(dp, dp, d)
+                dipole_self_interaction += dipole_energy
+    return dipole_self_interaction
 
 
 def get_DOS_hilbert(pickle_filename, channels):
@@ -304,6 +333,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
                              hicov_logfile, hicov_dosfile,
                              site_pos=[0., 0., 0.],
                              locov_densityfile=None,
+                             hicov_densityfile=None,
                              verbose=False,
                              spinpol=False,
                              adsorbate_species=[
@@ -360,6 +390,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         '_hicov_logfile': os.path.realpath(hicov_logfile),
         '_hicov_dosfile': os.path.realpath(hicov_dosfile),
         '_locov_densityfile': os.path.realpath(locov_densityfile) if locov_densityfile else None ,
+        '_hicov_densityfile': os.path.realpath(hicov_densityfile) if hicov_densityfile else None ,
     })
 
     # collect clean surface info
@@ -461,12 +492,26 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     if locov_densityfile :
         origin, cell, charge = extract_charge(locov_densityfile, clip=True)
-        dipole = get_dipole(cell, charge, hicov)
+        dipole = get_dipole(charge, locov)
 
         interactions[surface_name][adsorbate_name][
             site_name].update({'dipole': dipole})
+        interactions[surface_name][adsorbate_name][
+            site_name].update({'locov_dipole': dipole})
         if verbose:
             print('==> DEBUG DENSITY-FILE: {locov_densityfile}\n\tLOG-FILE: {locov_logfile}\n\tGEOM: {locov}\n\tCELL:{cell}\n\tCHARGE-SHAPE: {charge.shape}\n\t'.format(**locals()))
+            print('dipole = {dipole} eA'.format(**locals()))
+
+    if hicov_densityfile :
+        origin, cell, charge = extract_charge(hicov_densityfile, clip=True)
+        dipole = get_dipole(charge, hicov)
+
+        interactions[surface_name][adsorbate_name][
+            site_name].update({'dipole': dipole})
+        interactions[surface_name][adsorbate_name][
+            site_name].update({'hicov_dipole': dipole})
+        if verbose:
+            print('==> DEBUG DENSITY-FILE: {hicov_densityfile}\n\tLOG-FILE: {hicov_logfile}\n\tGEOM: {hicov}\n\tCELL:{cell}\n\tCHARGE-SHAPE: {charge.shape}\n\t'.format(**locals()))
             print('dipole = {dipole} eA'.format(**locals()))
 
     # - d-band shift(s)
