@@ -36,14 +36,14 @@ def get_dipole_energy(dipole1, dipole2, distance):
     which is for the simple case of two parallel dipoles here:
 
     $$
-    U = \frac{p_{1}p_{2}}{2 \pi \epsilon_0 r^3}
+    U = \frac{p_{1}p_{2}}{4 \pi \epsilon_0 r^3}
     $$
 
 
 
     """
     return (dipole1 * ase.units.Angstrom) * (dipole2 * ase.units.Angstrom) \
-        / 2 / np.pi / (distance * ase.units.Angstrom) ** 3 \
+        / 4 / np.pi / (distance * ase.units.Angstrom) ** 3 \
         / ase.units._eps0 / ase.units.C * ase.units.m
 
 
@@ -128,7 +128,7 @@ def merge(dict1, dict2):
             yield (k, dict2[k])
 
 
-def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=25, pbc=None, verbose=False, comment='', dipole_contribution=False):
+def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, pbc=None, verbose=False, comment='', dipole_contribution=False):
     """Calculate the adsorbate-adsorbate interaction based in d-band perturbations and electrostatic dipoles
     of isolated adsorbates.
 
@@ -236,12 +236,19 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=25, pbc=None
 
         #print('interaction contrib = {interaction_contrib}'.format(**locals()))
         if dipole_contribution:
-            dp = interactions[surface][molecule][site]['dipole']
-            dipole_self_interaction = dp**2 * calculate_periodic_dipole_interaction(1., cell, ER)
+            hicov_dipole = interactions[surface][molecule][site]['hicov_dipole']
+            locov_dipole = interactions[surface][molecule][site]['locov_dipole']
+
+            hicov_cell = interactions[surface]['_hicov_cell']
+            locov_cell = interactions[surface]['_locov_cell']
+
+            hicov_ES = hicov_dipole**2 * calculate_periodic_dipole_interaction(1., hicov_cell, ER1)
+            locov_ES = locov_dipole**2 * calculate_periodic_dipole_interaction(1., locov_cell, ER1)
+            dipole_self_interaction =  hicov_ES - locov_ES
 
             dband_delta_E = interactions[surface][molecule][site]['delta_E'] - dipole_self_interaction
             if verbose:
-                print('Dipole self-interaction {molecule}@{site} {dipole_self_interaction: .3f} eV (Dipole {dp: .3f} eA). d-Band energy {dband_delta_E: .3f}.'.format(**locals()))
+                print('Dipole self-interaction {molecule}@{site} {hicov_ES: .3f} - {locov_ES: .3f} = {dipole_self_interaction: .3f} eV (Dipole {hicov_dipole: .3f}/{locov_dipole: .3f} eA). d-Band energy {dband_delta_E: .3f}.'.format(**locals()))
         else:
             dband_delta_E = interactions[surface][molecule][site]['delta_E']
 
@@ -256,10 +263,9 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=25, pbc=None
 
             cell = np.array(interactions[surface1]['_cell'])
 
-            for x in range(-ER, ER):
-                for y in range(-ER, ER):
+            for x in range(-ER2, ER2):
+                for y in range(-ER2, ER2):
                     if adsorbate1 != adsorbate2 or x != 0 or y != 0:
-                        # FIX BUG HERE !!!!!!!!!!
                         d = np.array([pbc[0] * x, pbc[1] * y, 0])
                         sp1 = np.array(interactions[surface1][molecule1][site1][
                                        'site_pos']) + np.array([rel_x1, rel_y1, 0.])
@@ -272,13 +278,14 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER=25, pbc=None
                         dp2 = np.array(
                             interactions[surface2][molecule2][site2]['dipole'])
 
-                        dp_energy = get_dipole_energy(dp1, dp2, r)
-                        ES_ENERGY += dp_energy / 1
+                        dp_energy = get_dipole_energy(dp1, dp2, r) / 2.  #  Correct for double-counting
+                        ES_ENERGY += dp_energy
                         #print('Distance {r} {dp_energy} eV, ({d} {sp1} {sp2})'.format(**locals()))
 
     #print('CELL {cell}'.format(**locals()))
     if verbose:
         print('Total electrostatic contribution {ES_ENERGY: .3f}'.format(**locals()))
+        print('Total d-Band contribution {interaction_energy: .3f}'.format(**locals()))
 
     if dipole_contribution:
         interaction_energy += ES_ENERGY
@@ -299,7 +306,7 @@ def calculate_periodic_dipole_interaction(dp, cell, ER):
             if x or y:
                 d = float(np.linalg.norm(np.dot(np.array([x,  y, 0]), cell)))
                 dipole_energy = get_dipole_energy(dp, dp, d)
-                dipole_self_interaction += dipole_energy
+                dipole_self_interaction += dipole_energy  # avoid double counting
     return dipole_self_interaction
 
 
@@ -318,7 +325,7 @@ def get_DOS_hilbert(pickle_filename, channels):
 def get_e_w(energies, rhos):
     rho_sum = sum(rhos)
     d_band_center = sum(
-        [energy * rho for (energy, rho) in zip(energies, rhos)]) / rho_sum
+        [energy * rho for (energy, rho) in zip(energies, rhos) if energy <= 0.]) / rho_sum
     d_band_width = 4 * \
         np.sqrt(sum([(energy - d_band_center) ** 2 *
                      rho for (energy, rho) in zip(energies, rhos)]) / rho_sum)
@@ -395,7 +402,11 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     # collect clean surface info
     # - energy
+    if verbose:
+        print('Now reading {clean_surface_logfile} ... ({surface_name} {adsorbate_name}@{site_name})'.format(**locals()))
+
     clean_traj = espresso.io.read_log(clean_surface_logfile)
+
 
     clean = clean_traj[-1]
     clean_energy = clean.get_calculator().get_potential_energy()
@@ -409,9 +420,6 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     if spinpol:
         clean_channels.append([surface_atom, 'd', 1])
 
-    # save cell geometry
-    interactions[surface_name]['_cell']  = clean.cell.tolist()
-
     # - reference d-band center
     clean_energies, clean_DOS, _ = get_DOS_hilbert(
         clean_surface_dosfile, clean_channels)
@@ -422,7 +430,10 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     # collect high coverage surface info
     # - energy
+    if verbose:
+        print('Now reading {hicov_logfile} ... ({surface_name} {adsorbate_name}@{site_name})'.format(**locals()))
     hicov_traj = espresso.io.read_log(hicov_logfile)
+
     hicov = hicov_traj[-1]
     hicov_energy = hicov.get_calculator().get_potential_energy()
     hicov_cell = hicov.cell
@@ -464,6 +475,9 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     # collect low coverage info
     # - energy
+
+    if verbose:
+        print('Now reading {locov_logfile} ... ({surface_name} {adsorbate_name}@{site_name})'.format(**locals()))
     locov_traj = espresso.io.read_log(locov_logfile)
     locov = locov_traj[-1]
     locov_energy = locov.get_calculator().get_potential_energy()
@@ -514,6 +528,11 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
             print('==> DEBUG DENSITY-FILE: {hicov_densityfile}\n\tLOG-FILE: {hicov_logfile}\n\tGEOM: {hicov}\n\tCELL:{cell}\n\tCHARGE-SHAPE: {charge.shape}\n\t'.format(**locals()))
             print('dipole = {dipole} eA'.format(**locals()))
 
+    adsorbate_atoms = [i for i, species in enumerate(
+        hicov.get_chemical_symbols()) if species in adsorbate_species]
+    lowest_adsorbate_atom_hicov = adsorbate_atoms[
+        np.argmin(hicov.positions[adsorbate_atoms, 2])]
+
     # - d-band shift(s)
     adsorbate_atoms = [i for i, species in enumerate(
         locov.get_chemical_symbols()) if species in adsorbate_species]
@@ -525,6 +544,11 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     lowest_adsorbate_atom = adsorbate_atoms[
         np.argmin(locov.positions[adsorbate_atoms, 2])]
+
+
+    # DEBUGGING
+    interactions[surface_name][adsorbate_name][site_name]['dz'] = hicov.positions[lowest_adsorbate_atom_hicov, 2] - locov.positions[lowest_adsorbate_atom, 2]
+
 
     if verbose:
         print(
@@ -571,5 +595,10 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     if verbose:
         print('locov d-band position {locov_E_d}'.format(**locals()))
+
+    # save cell geometry
+    interactions[surface_name]['_cell']  = clean.cell.tolist()
+    interactions[surface_name]['_locov_cell']  = locov.cell.tolist()
+    interactions[surface_name]['_hicov_cell']  = hicov.cell.tolist()
 
     return interactions
