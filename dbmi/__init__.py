@@ -248,7 +248,6 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
 
             hicov_ES = hicov_dipole**2 * calculate_periodic_dipole_interaction(1., hicov_cell, ER1)
             locov_ES = locov_dipole**2 * calculate_periodic_dipole_interaction(1., locov_cell, ER1)
-            locov_ES = 0.
             dipole_self_interaction =  hicov_ES - locov_ES
 
             dband_delta_E = interactions[surface][molecule][site]['delta_E'] - dipole_self_interaction
@@ -314,7 +313,7 @@ def calculate_periodic_dipole_interaction(dp, cell, ER):
             if x or y:
                 d = float(np.linalg.norm(np.dot(np.array([x,  y, 0]), cell)))
                 dipole_energy = get_dipole_energy(dp, dp, d)
-                dipole_self_interaction += dipole_energy / 2  # avoid double counting
+                dipole_self_interaction += dipole_energy # avoid double counting
     return dipole_self_interaction
 
 
