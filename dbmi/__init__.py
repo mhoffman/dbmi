@@ -174,6 +174,8 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
     # calculate d-band shifts based on other adsorbates
     for i, adsorbate in enumerate(adsorbates):
         surface, molecule, site, rel_x, rel_y = adsorbate
+        if molecule is None :
+            continue
         if verbose:
             print("Metal: {surface},  molecule: {molecule}, site: {site}, (X, Y) = ({rel_x}, {rel_y})".format(
                 **locals()))
@@ -209,6 +211,8 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
     interaction_energy = 0.
     for i, adsorbate in enumerate(adsorbates):
         surface, molecule, site, rel_x, rel_y = adsorbate
+        if molecule is None :
+            continue
         cell = np.array(interactions[surface]['_cell'])
         interaction_contrib = 0.
         d_shift_sum = sum(interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0)
@@ -244,6 +248,7 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
 
             hicov_ES = hicov_dipole**2 * calculate_periodic_dipole_interaction(1., hicov_cell, ER1)
             locov_ES = locov_dipole**2 * calculate_periodic_dipole_interaction(1., locov_cell, ER1)
+            locov_ES = 0.
             dipole_self_interaction =  hicov_ES - locov_ES
 
             dband_delta_E = interactions[surface][molecule][site]['delta_E'] - dipole_self_interaction
@@ -260,6 +265,9 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
         for j, adsorbate2 in enumerate(adsorbates):
             surface1, molecule1, site1, rel_x1, rel_y1 = adsorbate1
             surface2, molecule2, site2, rel_x2, rel_y2 = adsorbate2
+
+            if molecule1 is None or molecule2 is None:
+                continue
 
             cell = np.array(interactions[surface1]['_cell'])
 
@@ -306,7 +314,7 @@ def calculate_periodic_dipole_interaction(dp, cell, ER):
             if x or y:
                 d = float(np.linalg.norm(np.dot(np.array([x,  y, 0]), cell)))
                 dipole_energy = get_dipole_energy(dp, dp, d)
-                dipole_self_interaction += dipole_energy  # avoid double counting
+                dipole_self_interaction += dipole_energy / 2  # avoid double counting
     return dipole_self_interaction
 
 
