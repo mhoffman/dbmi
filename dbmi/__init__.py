@@ -161,6 +161,12 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
     min_y = min(ys)
     max_y = max(ys)
 
+    # get-consistent dipole-dipole interaction parameter
+    if pbc:
+        ER1 = int(ER2 * np.sqrt(pbc[0]*pbc[1]))
+    else:
+        ER1 = ER2
+
     lattice = np.array
     # the d-bands shifts the i-th atom see, due to all other atoms
     lattice_dbands = [np.zeros(
@@ -246,9 +252,9 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
             hicov_cell = interactions[surface]['_hicov_cell']
             locov_cell = interactions[surface]['_locov_cell']
 
-            hicov_ES = hicov_dipole**2 * calculate_periodic_dipole_interaction(1., hicov_cell, ER1)
-            locov_ES = locov_dipole**2 * calculate_periodic_dipole_interaction(1., locov_cell, ER1)
-            dipole_self_interaction =  hicov_ES - locov_ES
+            hicov_ES = hicov_dipole**2 * calculate_periodic_dipole_interaction(1., hicov_cell, ER1) / 1.
+            locov_ES = locov_dipole**2 * calculate_periodic_dipole_interaction(1., locov_cell, ER1) / 1.
+            dipole_self_interaction =  (hicov_ES - locov_ES)
 
             dband_delta_E = interactions[surface][molecule][site]['delta_E'] - dipole_self_interaction
             if verbose:
@@ -258,17 +264,28 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
 
         interaction_energy += dband_delta_E  * interaction_contrib
 
+        if verbose :
+            print('   - d-band filling factor {interaction_contrib: .3f}'.format(**locals()))
+
     # calculate dipole interaction energy
     ES_ENERGY = 0.
     for i, adsorbate1 in enumerate(adsorbates):
+        adsorbate1_ES_energy = 0.
+        surface1, molecule1, site1, rel_x1, rel_y1 = adsorbate1
+        locov_cell = np.array(interactions[surface1]['_locov_cell'])
+
+        # dipole self-interaction correction
+        locov_dipole1 = interactions[surface1][molecule1][site1]['locov_dipole']
+        locov_ES1 = locov_dipole1**2 * calculate_periodic_dipole_interaction(1., locov_cell, ER1) / 1.
+        #adsorbate1_ES_energy -= locov_ES1
+        if verbose :
+            print("ES locov correction {locov_ES1: .3f} eV".format(**locals()))
+
         for j, adsorbate2 in enumerate(adsorbates):
-            surface1, molecule1, site1, rel_x1, rel_y1 = adsorbate1
             surface2, molecule2, site2, rel_x2, rel_y2 = adsorbate2
 
             if molecule1 is None or molecule2 is None:
                 continue
-
-            cell = np.array(interactions[surface1]['_cell'])
 
             for x in range(-ER2, ER2):
                 for y in range(-ER2, ER2):
@@ -285,9 +302,12 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
                         dp2 = np.array(
                             interactions[surface2][molecule2][site2]['dipole'])
 
-                        dp_energy = get_dipole_energy(dp1, dp2, r) / 2.  #  Correct for double-counting
-                        ES_ENERGY += dp_energy
+                        dp_energy = get_dipole_energy(dp1, dp2, r) / 1.  #  Correct for double-counting
+                        adsorbate1_ES_energy += dp_energy
                         #print('Distance {r} {dp_energy} eV, ({d} {sp1} {sp2})'.format(**locals()))
+        if verbose:
+            print('    - coverage ES energy {molecule}@{site} ({rel_x1}x{rel_x2}) {adsorbate1_ES_energy: .3f} eV'.format(**locals()))
+        ES_ENERGY += adsorbate1_ES_energy - locov_ES1
 
     #print('CELL {cell}'.format(**locals()))
     if verbose:
