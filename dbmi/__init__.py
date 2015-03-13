@@ -147,6 +147,12 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
 
     """
 
+    dipole_factor = 2.
+    # Kohn, W., and K. -H. Lau.
+    # Adatom Dipole Moments on Metals and Their Interactions.
+    # Solid State Communications 18, no. 5 (1976): 553-555.
+    # doi:10.1016/0038-1098(76)91479-4.
+
     if verbose:
         if pbc:
             print('\n\nUnit cell Size ({}x{})'.format(pbc[0], pbc[1]))
@@ -252,8 +258,8 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
             hicov_cell = interactions[surface]['_hicov_cell']
             locov_cell = interactions[surface]['_locov_cell']
 
-            hicov_ES = hicov_dipole**2 * calculate_periodic_dipole_interaction(1., hicov_cell, ER1) / 1.
-            locov_ES = locov_dipole**2 * calculate_periodic_dipole_interaction(1., locov_cell, ER1) / 1.
+            hicov_ES = dipole_factor * hicov_dipole**2 * calculate_periodic_dipole_interaction(1., hicov_cell, ER1) / 2.
+            locov_ES = dipole_factor * locov_dipole**2 * calculate_periodic_dipole_interaction(1., locov_cell, ER1) / 2.
             dipole_self_interaction =  (hicov_ES - locov_ES)
 
             dband_delta_E = interactions[surface][molecule][site]['delta_E'] - dipole_self_interaction
@@ -276,7 +282,7 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
 
         # dipole self-interaction correction
         locov_dipole1 = interactions[surface1][molecule1][site1]['locov_dipole']
-        locov_ES1 = locov_dipole1**2 * calculate_periodic_dipole_interaction(1., locov_cell, ER1) / 1.
+        locov_ES1 = dipole_factor * locov_dipole1**2 * calculate_periodic_dipole_interaction(1., locov_cell, ER1) / 2.
         #adsorbate1_ES_energy -= locov_ES1
         if verbose :
             print("ES locov correction {locov_ES1: .3f} eV".format(**locals()))
@@ -302,7 +308,7 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
                         dp2 = np.array(
                             interactions[surface2][molecule2][site2]['dipole'])
 
-                        dp_energy = get_dipole_energy(dp1, dp2, r) / 1.  #  Correct for double-counting
+                        dp_energy = dipole_factor * get_dipole_energy(dp1, dp2, r) / 2.  #  Correct for double-counting
                         adsorbate1_ES_energy += dp_energy
                         #print('Distance {r} {dp_energy} eV, ({d} {sp1} {sp2})'.format(**locals()))
         if verbose:
@@ -350,15 +356,10 @@ def get_DOS_hilbert(pickle_filename, channels):
 
 
 def get_e_w(energies, rhos):
-    rho_sum = sum(rhos)
-    d_band_center = sum(
-        [energy * rho for (energy, rho) in zip(energies, rhos) if energy <= 0.]) / rho_sum
-    d_band_width = 4 * \
-        np.sqrt(sum([(energy - d_band_center) ** 2 *
-                     rho for (energy, rho) in zip(energies, rhos)]) / rho_sum)
-    E_d = d_band_center + d_band_width / 2.
 
-    return d_band_center, d_band_width
+    ed = np.trapz(energies * rhos, energies) / np.trapz(rhos, energies)
+    wd2 = np.trapz((energies-ed)**2*rhos, energies) / np.trapz(rhos, energies)
+    return ed, wd2
 
 
 def collect_interaction_data(surface_name, adsorbate_name, site_name,
@@ -495,6 +496,9 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     interactions[surface_name][adsorbate_name][site_name].update(
         {'delta_D': (clean_E_d - hicov_E_d)})
+
+    interactions[surface_name][adsorbate_name][site_name].update(
+        {'_D_clean': (clean_E_d)})
 
     if verbose:
         print("High Cov Energy {hicov_energy}, ({hicov_x:.2f}x{hicov_y:.2f})".format(
