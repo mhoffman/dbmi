@@ -192,8 +192,11 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
             print("Metal: {surface},  molecule: {molecule}, site: {site}, (X, Y) = ({rel_x}, {rel_y})".format(
                 **locals()))
 
-        d_shift_sum = sum(interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0)
-                          for x in range(-DR, DR) for y in range(-DR, DR))
+        try:
+            d_shift_sum = sum(interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0)
+                              for x in range(-DR, DR) for y in range(-DR, DR))
+        except KeyError:
+            raise UserWarning('Interaction database lacks necessary parameters for {surface} {molecule} {site}'.format(**locals()))
 
         X, Y = lattice_dbands[i].shape
         for x in range(X):
