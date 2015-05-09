@@ -325,13 +325,12 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
 
     if dipole_contribution:
         interaction_energy += ES_ENERGY
-        
-        
+
 
     if comment:
         print(
             '{comment} ---> interaction energy {interaction_energy:.3f} eV.\n'.format(**locals()))
-    return interaction_energy
+    return interaction_energy, interaction_energy - ES_ENERGY, ES_ENERGY
 
 
 @memory.cache
@@ -537,6 +536,15 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     interactions[surface_name][adsorbate_name][
         site_name].update({'delta_E': delta_E})
+
+
+    # DEBUGGING
+    interactions[surface_name][adsorbate_name][
+        site_name].update({'_hicov_energy': hicov_energy})
+    interactions[surface_name][adsorbate_name][
+        site_name].update({'_locov_energy': locov_energy})
+    interactions[surface_name][adsorbate_name][
+        site_name].update({'_clean_energy': clean_energy})
 
     if locov_densityfile :
         origin, cell, charge = extract_charge(locov_densityfile, clip=True)
