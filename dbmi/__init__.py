@@ -47,7 +47,7 @@ def get_dipole_energy(dipole1, dipole2, distance):
         / ase.units._eps0 / ase.units.C * ase.units.m
 
 
-def get_dipole(charge, geom, verbose=False):
+def get_dipole(charge, geom, z_only=True, verbose=False):
     """
         Extract the dipole in the z-direction (3rd axis).
 
@@ -61,36 +61,103 @@ def get_dipole(charge, geom, verbose=False):
     cell = geom.cell
 
     if verbose:
-        print("get_dipole cell = {cell}".format(**locals()))
+        print("get_dipole cell = {cell}\n\n".format(**locals()))
 
     X, Y, Z = map(np.complex, charge.shape)
     dx, dy, dz =  map(lambda x: 1./x, charge.shape)
 
-    XYZ = np.column_stack(map(lambda x: x.flatten(), np.mgrid[0.:1.:dx, 0.:1.:dy, 0.:1.:dz]))
-    e_center = - np.dot(cell.T, np.sum(XYZ * charge.flatten()[:, None], axis=0) / 1.)
+    if not z_only:
+        XYZ = np.column_stack(map(lambda x: x.flatten(), np.mgrid[0.:1.:dx, 0.:1.:dy, 0.:1.:dz]))
+        e_center = - np.dot(cell.T, np.sum(XYZ * charge.flatten()[:, None], axis=0) / 1.)
 
-    if verbose:
-        print('    E-center   {e_center} [A, A, A]'.format(**locals()))
-        print('    Total electron charge {charge_sum} e'.format(charge_sum=charge.sum()))
+        if verbose:
+            print('    E-center   {e_center} [A, A, A]'.format(**locals()))
+            print('    Total electron charge {charge_sum} e'.format(charge_sum=charge.sum()))
 
-    for atom in geom:
-        ion_contrib = atom.position * dbmi.util.pseudo_charges[atom.symbol]
-        ion_center += ion_contrib
-        ion_charge += dbmi.util.pseudo_charges[atom.symbol]
+        for atom in geom:
+            ion_contrib = atom.position * dbmi.util.pseudo_charges[atom.symbol]
+            ion_center += ion_contrib
+            ion_charge += dbmi.util.pseudo_charges[atom.symbol]
 
-    if verbose:
-        print('    Ion-center {ion_center} [A, A, A]'.format(**locals()))
-        print('    Total ion charge {ion_charge} e'.format(**locals()))
+        if verbose:
+            print('    Ion-center {ion_center} [A, A, A]'.format(**locals()))
+            print('    Total ion charge {ion_charge} e'.format(**locals()))
 
-    return (ion_center + e_center)[-1]
+        return (ion_center + e_center)[-1]
+    else:
+        ion_center = 0.
+        e_center = 0.
+
+        total_electron_charge = charge.sum()
+
+        shape = charge.shape
+        if verbose:
+            print('CHARGE GRID {charge.shape}'.format(**locals()))
+            print('CELL {cell}'.format(**locals()))
+
+        for atom_i, atom in enumerate(geom):
+            ion_contrib = geom.get_positions()[atom_i][-1] * dbmi.util.pseudo_charges[atom.symbol]
+            ion_center += ion_contrib
+            ion_charge += dbmi.util.pseudo_charges[atom.symbol]
+
+        z_charge = charge.sum(axis=0).sum(axis=0) * (1) * ion_charge / charge.sum()
+        Z = (np.mgrid[0.:1.:dz] ) * cell[-1, -1]
+
+        e_center =  np.sum(Z * z_charge)
+        e_center /=  z_charge.sum()
+        ion_center /= ion_charge
+
+        ion_dipole = ion_center * ion_charge
+        e_dipole = e_center * charge.sum()
+
+        dipole = (ion_dipole - e_dipole)
+
+        if verbose:
+            print('    Z evaluation only {z_only}'.format(**locals()))
+            print('    E-center   {e_center} A'.format(**locals()))
+            print('    Total electron charge {charge_sum} e'.format(charge_sum=charge.sum()))
+            print('    Rescaled electron charge {z_charge_sum} e'.format(z_charge_sum=z_charge.sum()))
+
+            print('    Ion-center {ion_center} A'.format(**locals()))
+            print('    Total ion charge {ion_charge} e\n'.format(**locals()))
+            print('    Electron dipole {e_dipole} | ion_dipole {ion_dipole}\n\n\n'.format(**locals()))
+            print('    Dipole {dipole} eA'.format(**locals()))
+
+        return dipole
+
 
 
 def extract_charge(pickle_filename, verbose=True, clip=True):
-    with open(pickle_filename) as infile:
-        origin, cell, charge = pickle.load(infile)
+    """
+
+    Extract charge from a pickle file and crop and normalize to that all voxels sum to the total charge
+
+    WARNING: This function assumes that the charge was extract using the ase-espressso calculator's
+    calc.extract_total_potential() function, which is why this methods divides by Rydberg.
+    If the charge density was extract using a different (i.e. the correct method) you
+    may have to multiply with Rydberg again. In any case sum up all charge density and make sure
+    this agrees within less of a electron of what you expect for your system.
+
+    :param filename: path of pickle file to open
+    :type pickle_filename: str or file
+    :param verbose: Switch wether function should print status messages to stdout
+    :type verbose:  bool
+    :param clip: Switch wether the last slice along each axis should be dropped. By default QE puts a periodic copy at the opposite end of the supercell.
+    :type verbose: bool
+
+    """
+    if type(pickle_filename) is str:
+        with open(pickle_filename) as infile:
+            origin, cell, charge = pickle.load(infile)
+    elif type(pickle_filename) is file:
+        origin, cell, charge = pickle.load(infile
+    else:
+        raise UserWarning('Filename argument {pickle_filename} is neither a file nor a path'.format(**locals()))
 
     # convert unit cell to atomic units (bohr radii)
-    cb = cell_bohr = cell / ase.units.Bohr
+    bohr = ase.units.Bohr * (1. )
+    #bohr = 0.5291772108
+    cb = cell_bohr = cell / bohr
 
     # calculate cell volume
     volume = np.dot(np.cross(cb[0], cb[1]), cb[2])
@@ -98,7 +165,6 @@ def extract_charge(pickle_filename, verbose=True, clip=True):
     # clip copies from charge density
     if clip:
         charge = charge[:-1, :-1, :-1]
-    #charge = charge[1:, 1:, 1:]
 
     voxels = np.array(charge.shape).prod()
 
@@ -204,14 +270,20 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
                 for j in range(len(adsorbates)):
                     # if True:
                     if j != i:
+
+                        # this factor rescale how strong
+                        # adsorbates interaction with the d-band center
+                        adsorbate_j = adsorbates[j][1]
+                        site_j = adsorbates[j][2]
+                        interaction_scaling = ((interactions[surface][adsorbate_j][site_j]['delta_D'] / interactions[surface][adsorbate_j][site_j]['delta_E'])/
+                                              (interactions[surface][molecule][site]['delta_D'] / interactions[surface][molecule][site]['delta_E']))
+
                         if pbc is not None:
                             lattice_dbands[j][x % pbc[0], y % pbc[1]] += interactions[surface][molecule][site]['V'].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
-                                interactions[surface][molecule][
-                                    site]['delta_D'] / d_shift_sum
+                                interactions[surface][molecule][site]['delta_D'] / d_shift_sum * interaction_scaling
                         else:
                             lattice_dbands[j][x, y] += interactions[surface][molecule][site]['V'].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
-                                interactions[surface][molecule][
-                                    site]['delta_D'] / d_shift_sum
+                                interactions[surface][molecule][site]['delta_D'] / d_shift_sum * interaction_scaling
                     else:
                         if pbc is not None:
                             self_int[j][x % pbc[0], y % pbc[1]] += interactions[surface][molecule][site]['V'].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
