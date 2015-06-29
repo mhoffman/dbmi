@@ -265,7 +265,6 @@ def merge(dict1, dict2):
             yield (k, dict2[k])
 
 
-<<<<<<< HEAD
 def calculate_emt_interaction_energy(metal, adsorbates, pbc=None, vacuum=15):
     # collect energies of isolated adsorbates
     import ase.lattice.surface
@@ -336,10 +335,7 @@ def calculate_emt_interaction_energy(metal, adsorbates, pbc=None, vacuum=15):
     return full_energy - adsorption_energies
 
 
-def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, pbc=None, verbose=False, comment='', dipole_contribution=False):
-=======
 def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, pbc=None, verbose=False, comment='', dipole_contribution=False, interaction='D'):
->>>>>>> f1c7e4c5493fb4cff3aee9eba5fd45b299c6ff42
     """Calculate the adsorbate-adsorbate interaction based in d-band perturbations and electrostatic dipoles
     of isolated adsorbates.
 
