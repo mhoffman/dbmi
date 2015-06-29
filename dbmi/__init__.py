@@ -128,6 +128,76 @@ def merge(dict1, dict2):
             yield (k, dict2[k])
 
 
+def calculate_emt_interaction_energy(metal, adsorbates, pbc=None, vacuum=15):
+    # collect energies of isolated adsorbates
+    import ase.lattice.surface
+    import ase.calculators.emt
+    import ase.constraints
+    import ase.optimize
+    import ase.visualize
+
+    fmax = 0.01
+
+    empty_slab  = ase.lattice.surface.fcc111(metal, [1, 1, 4], vacuum=vacuum)
+    empty_slab.set_calculator(ase.calculators.emt.EMT())
+    empty_slab.set_constraint(ase.constraints.FixAtoms(mask=empty_slab.get_tags() > 2))
+    dyn = ase.optimize.BFGS(empty_slab)
+    dyn.run(fmax=fmax)
+    empty_slab_energy = empty_slab.get_potential_energy()
+
+    ##########################################
+    # calculate individual adsorption energies
+    ##########################################
+    X0, Y0 = 4, 4
+    adsorption_energies = []
+    for _, adsorbate, site, x, y in adsorbates:
+        print(adsorbate)
+        slab = ase.lattice.surface.fcc111(metal, [X0, Y0, 4], vacuum=vacuum)
+        adsorbate_atoms = ase.atoms.Atoms(adsorbate)
+        ase.lattice.surface.add_adsorbate(slab,
+                                          adsorbate_atoms,
+                                          height=1.2,
+                                          position=site,)
+        slab.set_constraint(ase.constraints.FixAtoms(mask=slab.get_tags() > 2))
+        slab.set_calculator(ase.calculators.emt.EMT())
+        dyn = ase.optimize.BFGS(slab)
+        dyn.run(fmax=fmax)
+        energy = slab.get_potential_energy()
+        adsorption_energies.append(
+            energy - X0 * Y0 * empty_slab_energy
+        )
+    adsorption_energies = sum(adsorption_energies)
+
+    ##########################################
+    # calculate energy of combined adsorbates
+    ##########################################
+    slab = ase.lattice.surface.fcc111(metal, [pbc[0], pbc[1], 4], vacuum=vacuum)
+    for _, adsorbate, site, x, y in adsorbates:
+        adsorbate_atoms = ase.atoms.Atoms(adsorbate)
+        ase.lattice.surface.add_adsorbate(slab,
+                                          adsorbate_atoms,
+                                          height=1.2,
+                                          position=site,
+                                          offset=[x,y])
+
+    slab.set_constraint(ase.constraints.FixAtoms(mask=slab.get_tags() > 2))
+    slab.set_calculator(ase.calculators.emt.EMT())
+    dyn = ase.optimize.BFGS(slab)
+    dyn.run(fmax=fmax)
+
+    ase.visualize.view(slab)
+
+    full_energy = slab.get_potential_energy()
+    full_energy -= pbc[0] * pbc[1] * empty_slab_energy
+
+    ##########################################
+    # subtract
+    ##########################################
+
+    print("FULL ENERGY {full_energy} eV, ADSORPTION ENERGIES {adsorption_energies}".format(**locals()))
+    return full_energy - adsorption_energies
+
+
 def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, pbc=None, verbose=False, comment='', dipole_contribution=False):
     """Calculate the adsorbate-adsorbate interaction based in d-band perturbations and electrostatic dipoles
     of isolated adsorbates.
@@ -284,7 +354,11 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
         locov_cell = np.array(interactions[surface1]['_locov_cell'])
 
         # dipole self-interaction correction
-        locov_dipole1 = interactions[surface1][molecule1][site1]['locov_dipole']
+        try:
+            locov_dipole1 = interactions[surface1][molecule1][site1]['locov_dipole']
+        except KeyError as e:
+            print('Error "{e}" Surface1 "{surface1}" Molecule1 "{molecule1}" Site1 "{site1}".'.format(**locals()))
+            raise
         locov_ES1 = dipole_factor * locov_dipole1**2 * calculate_periodic_dipole_interaction(1., locov_cell, ER1) / 2.
         #adsorbate1_ES_energy -= locov_ES1
         if verbose :
@@ -325,8 +399,8 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
 
     if dipole_contribution:
         interaction_energy += ES_ENERGY
-        
-        
+
+
 
     if comment:
         print(
