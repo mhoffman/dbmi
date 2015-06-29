@@ -2,6 +2,21 @@
 # production installation of QuantumEspresso on the SUNCAT cluster , Stanford
 
 
+dband_filling = {
+    'Fe': .7,
+    'Ru': .7,
+    'Os': .7,
+    'Co': .8,
+    'Rh': .8,
+    'Ir': .8,
+    'Ni': .9,
+    'Pd': .9,
+    'Pt': .9,
+    'Cu': 1.,
+    'Ag': 1.,
+    'Au': 1.,
+}
+
 pseudo_charges = {
     'Ag': 1.100000000000000E+001,
     'Al': 3.000000000000000E+000,

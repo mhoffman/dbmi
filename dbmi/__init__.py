@@ -22,6 +22,77 @@ import joblib
 import tempfile
 
 memory = joblib.Memory(cachedir=tempfile.mkdtemp(), verbose=0)
+np.set_printoptions(linewidth=200)
+
+
+def density2cube(options):
+    """
+        All options are passed a dictionary, yes, don't ask why
+
+        Arguments are
+
+            options['trajfile'] : path of ASE trajfile that holds trajectory of atoms file
+            options['logfile'] : logfile of QE calculation (optionnal)
+            options['pickle'] : pickle file of density as created by QE calculatior (origin, cell, density)
+            options['outfile'] : path of cube file where data is written to
+            options['with_ase'] : use ASE Cube file writer
+
+    """
+    if 'trajfile' in options:
+        traj = [ase.io.read(options['trajfile'])]
+    elif 'logfile' in options:
+        traj = espresso.io.read_log(options['logfile'])
+    else:
+        traj = [None]
+
+    atoms = traj[-1]
+    print(atoms)
+    try:
+        with open(options['pickle']) as infile:
+            data = pickle.load(infile)
+    except:
+        pfilename = options['pickle']
+        print "Error opening {pfilename}".format(**locals())
+        return
+
+    origin, cell, density = data
+    density = density[:-1, :-1, :-1]
+
+    cell /= Bohr
+
+    print(density.shape)
+    density /= ase.units.Rydberg
+
+    n_atoms = len(atoms)
+    origin_s = ' '.join(map(lambda x: '   {: 10.6f}'.format(x), origin.tolist()))
+    x, y, z = density.shape
+    X = ' '.join(map(lambda x: '   {: 10.6f}'.format(x), cell[ 0]/float(x)))
+    Y = ' '.join(map(lambda x: '   {: 10.6f}'.format(x), cell[ 1]/float(y)))
+    Z = ' '.join(map(lambda x: '   {: 10.6f}'.format(x), cell[ 2]/float(z)))
+
+
+    with open(options['outfile'], 'w') as outfile:
+        if options['with_ase']:
+            ase.io.cube.write_cube(outfile, atoms, density)
+        else:
+            outfile.write('# generated from {options[logfile]} and {options[pickle]}\n'.format(**locals()))
+            outfile.write('OUTER LOOP: X, MIDDLE LOOP: Y, INNER LOOP: Z\n')
+            outfile.write('{n_atoms: 5d} {origin_s}\n'.format(**locals()))
+            outfile.write('{x: 5d} {X}\n'.format(**locals()))
+            outfile.write('{y: 5d} {Y}\n'.format(**locals()))
+            outfile.write('{z: 5d} {Z}\n'.format(**locals()))
+            for i, atom in enumerate(atoms):
+                atom_number = atoms[i].number
+                position = ' '.join(map(lambda x: '   {: 10.6f}'.format(x), atom.position / Bohr))
+                outfile.write('   {atom_number: 5d}   0.000000 {position}\n'.format(**locals()))
+            for xi in range(int(x)):
+                for yi in range(int(y)):
+                    for zi in range(int(z)):
+                        outfile.write('{: .5e} '.format(density[xi, yi, zi]))
+                        if zi % 6 == 5 :
+                            outfile.write('\n')
+            outfile.write('\n')
+
 
 def get_dipole_energy(dipole1, dipole2, distance):
     """Calculate potential energy between two dipole, assuming
@@ -47,7 +118,7 @@ def get_dipole_energy(dipole1, dipole2, distance):
         / ase.units._eps0 / ase.units.C * ase.units.m
 
 
-def get_dipole(charge, geom, verbose=False):
+def get_dipole(charge, geom, z_only=True, verbose=False):
     """
         Extract the dipole in the z-direction (3rd axis).
 
@@ -61,36 +132,103 @@ def get_dipole(charge, geom, verbose=False):
     cell = geom.cell
 
     if verbose:
-        print("get_dipole cell = {cell}".format(**locals()))
+        print("get_dipole cell = {cell}\n\n".format(**locals()))
 
     X, Y, Z = map(np.complex, charge.shape)
     dx, dy, dz =  map(lambda x: 1./x, charge.shape)
 
-    XYZ = np.column_stack(map(lambda x: x.flatten(), np.mgrid[0.:1.:dx, 0.:1.:dy, 0.:1.:dz]))
-    e_center = - np.dot(cell.T, np.sum(XYZ * charge.flatten()[:, None], axis=0) / 1.)
+    if not z_only:
+        XYZ = np.column_stack(map(lambda x: x.flatten(), np.mgrid[0.:1.:dx, 0.:1.:dy, 0.:1.:dz]))
+        e_center = - np.dot(cell.T, np.sum(XYZ * charge.flatten()[:, None], axis=0) / 1.)
 
-    if verbose:
-        print('    E-center   {e_center} [A, A, A]'.format(**locals()))
-        print('    Total electron charge {charge_sum} e'.format(charge_sum=charge.sum()))
+        if verbose:
+            print('    E-center   {e_center} [A, A, A]'.format(**locals()))
+            print('    Total electron charge {charge_sum} e'.format(charge_sum=charge.sum()))
 
-    for atom in geom:
-        ion_contrib = atom.position * dbmi.util.pseudo_charges[atom.symbol]
-        ion_center += ion_contrib
-        ion_charge += dbmi.util.pseudo_charges[atom.symbol]
+        for atom in geom:
+            ion_contrib = atom.position * dbmi.util.pseudo_charges[atom.symbol]
+            ion_center += ion_contrib
+            ion_charge += dbmi.util.pseudo_charges[atom.symbol]
 
-    if verbose:
-        print('    Ion-center {ion_center} [A, A, A]'.format(**locals()))
-        print('    Total ion charge {ion_charge} e'.format(**locals()))
+        if verbose:
+            print('    Ion-center {ion_center} [A, A, A]'.format(**locals()))
+            print('    Total ion charge {ion_charge} e'.format(**locals()))
 
-    return (ion_center + e_center)[-1]
+        return (ion_center + e_center)[-1]
+    else:
+        ion_center = 0.
+        e_center = 0.
+
+        total_electron_charge = charge.sum()
+
+        shape = charge.shape
+        if verbose:
+            print('CHARGE GRID {charge.shape}'.format(**locals()))
+            print('CELL {cell}'.format(**locals()))
+
+        for atom_i, atom in enumerate(geom):
+            ion_contrib = geom.get_positions()[atom_i][-1] * dbmi.util.pseudo_charges[atom.symbol]
+            ion_center += ion_contrib
+            ion_charge += dbmi.util.pseudo_charges[atom.symbol]
+
+        z_charge = charge.sum(axis=0).sum(axis=0) * (1) * ion_charge / charge.sum()
+        Z = (np.mgrid[0.:1.:dz] ) * cell[-1, -1]
+
+        e_center =  np.sum(Z * z_charge)
+        e_center /=  z_charge.sum()
+        ion_center /= ion_charge
+
+        ion_dipole = ion_center * ion_charge
+        e_dipole = e_center * charge.sum()
+
+        dipole = (ion_dipole - e_dipole)
+
+        if verbose:
+            print('    Z evaluation only {z_only}'.format(**locals()))
+            print('    E-center   {e_center} A'.format(**locals()))
+            print('    Total electron charge {charge_sum} e'.format(charge_sum=charge.sum()))
+            print('    Rescaled electron charge {z_charge_sum} e'.format(z_charge_sum=z_charge.sum()))
+
+            print('    Ion-center {ion_center} A'.format(**locals()))
+            print('    Total ion charge {ion_charge} e\n'.format(**locals()))
+            print('    Electron dipole {e_dipole} | ion_dipole {ion_dipole}\n\n\n'.format(**locals()))
+            print('    Dipole {dipole} eA'.format(**locals()))
+
+        return dipole
+
 
 
 def extract_charge(pickle_filename, verbose=True, clip=True):
-    with open(pickle_filename) as infile:
+    """
+
+    Extract charge from a pickle file and crop and normalize to that all voxels sum to the total charge
+
+    WARNING: This function assumes that the charge was extract using the ase-espressso calculator's
+    calc.extract_total_potential() function, which is why this methods divides by Rydberg.
+    If the charge density was extract using a different (i.e. the correct method) you
+    may have to multiply with Rydberg again. In any case sum up all charge density and make sure
+    this agrees within less of a electron of what you expect for your system.
+
+    :param filename: path of pickle file to open
+    :type pickle_filename: str or file
+    :param verbose: Switch wether function should print status messages to stdout
+    :type verbose:  bool
+    :param clip: Switch wether the last slice along each axis should be dropped. By default QE puts a periodic copy at the opposite end of the supercell.
+    :type verbose: bool
+
+    """
+    if type(pickle_filename) is str:
+        with open(pickle_filename) as infile:
+            origin, cell, charge = pickle.load(infile)
+    elif type(pickle_filename) is file:
         origin, cell, charge = pickle.load(infile)
+    else:
+        raise UserWarning('Filename argument {pickle_filename} is neither a file nor a path'.format(**locals()))
 
     # convert unit cell to atomic units (bohr radii)
-    cb = cell_bohr = cell / ase.units.Bohr
+    bohr = ase.units.Bohr * (1. )
+    #bohr = 0.5291772108
+    cb = cell_bohr = cell / bohr
 
     # calculate cell volume
     volume = np.dot(np.cross(cb[0], cb[1]), cb[2])
@@ -98,7 +236,6 @@ def extract_charge(pickle_filename, verbose=True, clip=True):
     # clip copies from charge density
     if clip:
         charge = charge[:-1, :-1, :-1]
-    #charge = charge[1:, 1:, 1:]
 
     voxels = np.array(charge.shape).prod()
 
@@ -128,6 +265,7 @@ def merge(dict1, dict2):
             yield (k, dict2[k])
 
 
+<<<<<<< HEAD
 def calculate_emt_interaction_energy(metal, adsorbates, pbc=None, vacuum=15):
     # collect energies of isolated adsorbates
     import ase.lattice.surface
@@ -199,6 +337,9 @@ def calculate_emt_interaction_energy(metal, adsorbates, pbc=None, vacuum=15):
 
 
 def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, pbc=None, verbose=False, comment='', dipole_contribution=False):
+=======
+def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, pbc=None, verbose=False, comment='', dipole_contribution=False, interaction='D'):
+>>>>>>> f1c7e4c5493fb4cff3aee9eba5fd45b299c6ff42
     """Calculate the adsorbate-adsorbate interaction based in d-band perturbations and electrostatic dipoles
     of isolated adsorbates.
 
@@ -258,15 +399,20 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
         surface, molecule, site, rel_x, rel_y = adsorbate
         if molecule is None :
             continue
-        if verbose:
-            print("Metal: {surface},  molecule: {molecule}, site: {site}, (X, Y) = ({rel_x}, {rel_y})".format(
-                **locals()))
 
         try:
-            d_shift_sum = sum(interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0)
+            d_shift_sum = sum(interactions[surface][molecule][site][interaction].get(x, {}).get(y, 0)
                               for x in range(-DR, DR) for y in range(-DR, DR))
         except KeyError:
             raise UserWarning('Interaction database lacks necessary parameters for {surface} {molecule} {site}'.format(**locals()))
+
+        if verbose:
+            _delta_E = interactions[surface][molecule][site]['delta_E']
+            _delta_D = interactions[surface][molecule][site]['delta_D']
+            _delta_Q = interactions[surface][molecule][site]['delta_Q']
+
+            print("Metal: {surface},  molecule: {molecule}, site: {site}, (X, Y) = ({rel_x}, {rel_y} dE {_delta_E:+.3f} dD {_delta_D:+.3f} dQ {_delta_Q:+.3f}) sum(dD_i) {d_shift_sum: .3f}".format(
+                **locals()))
 
         X, Y = lattice_dbands[i].shape
         for x in range(X):
@@ -274,23 +420,31 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
                 for j in range(len(adsorbates)):
                     # if True:
                     if j != i:
+
+                        # this factor rescale how strong
+                        # adsorbates interaction with the d-band center
+                        adsorbate_j = adsorbates[j][1]
+                        site_j = adsorbates[j][2]
+                        #interaction_scaling = ((interactions[surface][adsorbate_j][site_j]['delta_D'] / interactions[surface][adsorbate_j][site_j]['delta_E'])/
+                                              #(interactions[surface][molecule][site]['delta_D'] / interactions[surface][molecule][site]['delta_E']))
+                        interaction_scaling = 1.
+
                         if pbc is not None:
-                            lattice_dbands[j][x % pbc[0], y % pbc[1]] += interactions[surface][molecule][site]['V'].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
-                                interactions[surface][molecule][
-                                    site]['delta_D'] / d_shift_sum
+                            lattice_dbands[j][x % pbc[0], y % pbc[1]] += interactions[surface][molecule][site][interaction].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
+                                interactions[surface][molecule][site]['delta_{interaction}'.format(**locals())] / d_shift_sum * interaction_scaling
                         else:
-                            lattice_dbands[j][x, y] += interactions[surface][molecule][site]['V'].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
-                                interactions[surface][molecule][
-                                    site]['delta_D'] / d_shift_sum
+                            lattice_dbands[j][x, y] += interactions[surface][molecule][site][interaction].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
+                                interactions[surface][molecule][site]['delta_{interaction}'.format(**locals())] / d_shift_sum * interaction_scaling
                     else:
                         if pbc is not None:
-                            self_int[j][x % pbc[0], y % pbc[1]] += interactions[surface][molecule][site]['V'].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
+                            self_int[j][x % pbc[0], y % pbc[1]] += interactions[surface][molecule][site][interaction].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
                                 interactions[surface][molecule][
-                                    site]['delta_D'] / d_shift_sum
+                                    site]['delta_{interaction}'.format(**locals())] / d_shift_sum
                         else:
-                            self_int[j][x, y] += interactions[surface][molecule][site]['V'].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
+                            self_int[j][x, y] += interactions[surface][molecule][site][interaction].get(x - (rel_x + DR), {}).get(y - (rel_y + DR), 0.) * \
                                 interactions[surface][molecule][
-                                    site]['delta_D'] / d_shift_sum
+                                    site]['delta_{interaction}'.format(**locals())] / d_shift_sum
+
 
     # calculate interaction energy
     interaction_energy = 0.
@@ -300,8 +454,14 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
             continue
         cell = np.array(interactions[surface]['_cell'])
         interaction_contrib = 0.
-        d_shift_sum = sum(interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0)
+        d_shift_sum = sum(interactions[surface][molecule][site][interaction].get(x, {}).get(y, 0)
                           for x in range(-DR, DR) for y in range(-DR, DR))
+        if verbose:
+            _sfi = self_int[i]
+            _div = np.array([float('nan')]*len(_sfi))
+            _li = lattice_dbands[i]
+            _out = np.column_stack((_sfi, _div, _li))
+            print("INTERACTION LATTICE {molecule} {rel_x} {rel_y}\n{_out}".format(**locals()))
         for x in range(-DR, DR):
             for y in range(-DR, DR):
 
@@ -312,16 +472,16 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
                 if pbc is not None:
                     w = self_int[i][(rel_x + x + DR) %
                                     pbc[0], (rel_y + y + DR) % pbc[1]]
-                    interaction_contrib += interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0.) * \
+                    interaction_contrib += interactions[surface][molecule][site][interaction].get(x, {}).get(y, 0.) * \
                         lattice_dbands[i][(rel_x + x + DR) % pbc[0], (rel_y + y + DR) % pbc[1]] / \
                         (interactions[surface][molecule]
-                         [site]['delta_D'] - w) / d_shift_sum
+                         [site]['delta_{interaction}'.format(**locals())] - w) / d_shift_sum
                 else:
                     w = self_int[i][x, y]
-                    interaction_contrib += interactions[surface][molecule][site]['V'].get(x, {}).get(y, 0.) * \
+                    interaction_contrib += interactions[surface][molecule][site][interaction].get(x, {}).get(y, 0.) * \
                         lattice_dbands[i][rel_x + x + DR, rel_y + y + DR] / \
                         (interactions[surface][molecule]
-                         [site]['delta_D'] - w) / d_shift_sum
+                         [site]['delta_{interaction}'.format(**locals())] - w) / d_shift_sum
 
         #print('interaction contrib = {interaction_contrib}'.format(**locals()))
         if dipole_contribution:
@@ -336,6 +496,8 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
             dipole_self_interaction =  (hicov_ES - locov_ES)
 
             dband_delta_E = interactions[surface][molecule][site]['delta_E'] - dipole_self_interaction
+            #if dbmi.util.dband_filling[surface[:2]]:
+                #dband_delta_E = 0.
             if verbose:
                 print('Dipole self-interaction {molecule}@{site} {hicov_ES: .3f} - {locov_ES: .3f} = {dipole_self_interaction: .3f} eV (Dipole {hicov_dipole: .3f}/{locov_dipole: .3f} eA). d-Band energy {dband_delta_E: .3f}.'.format(**locals()))
         else:
@@ -344,7 +506,7 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
         interaction_energy += dband_delta_E  * interaction_contrib
 
         if verbose :
-            print('   - d-band filling factor {interaction_contrib: .3f}'.format(**locals()))
+            print('   - d-band filling factor {interaction_contrib: .3f} {molecule}@{site} ({rel_x} {rel_y})'.format(**locals()))
 
     # calculate dipole interaction energy
     ES_ENERGY = 0.
@@ -401,11 +563,20 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
         interaction_energy += ES_ENERGY
 
 
-
     if comment:
         print(
             '{comment} ---> interaction energy {interaction_energy:.3f} eV.\n'.format(**locals()))
-    return interaction_energy
+    return interaction_energy, interaction_energy - ES_ENERGY, ES_ENERGY
+
+
+def calculate_overlap_energy(cell, n=2, ER=10):
+    epsilon = 0.
+    for x in range(-ER, ER):
+        for y in range(-ER, ER):
+            if x or y:
+                d = float(np.linalg.norm(np.dot(np.array([x, y, 0]), cell)))
+                epsilon += np.exp(- d / ase.units.Bohr / n)
+    return epsilon
 
 
 @memory.cache
@@ -424,10 +595,16 @@ def get_DOS_hilbert(pickle_filename, channels):
     with open(pickle_filename) as f:
         energies, dos, pdos = pickle.load(f)
 
-    out_dos = sum([
-        pdos[atom][band][channel] for (atom, band, channel) in channels
+    try:
+        out_dos = sum([
+            pdos[atom][band][channel] for (atom, band, channel) in channels
 
-    ])
+        ])
+    except:
+        import sys
+        exc_class, exc, tb = sys.exc_info()
+        new_exc = Exception('Error with {pickle_filename} on atom "{atom}", band "{band}" and channel "{channel}"'.format(**locals()))
+        raise new_exc.__class__, new_exc, tb
     hilbert_signal = np.imag(scipy.signal.hilbert(out_dos))
     return energies, out_dos, hilbert_signal
 
@@ -446,8 +623,13 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
                              site_pos=[0., 0., 0.],
                              locov_densityfile=None,
                              hicov_densityfile=None,
+                             locov_trajfile=None,
+                             hicov_trajfile=None,
+                             locov_bader_filename=None,
+                             hicov_bader_filename=None,
                              verbose=False,
                              spinpol=False,
+                             distance_cutoff=4, # Angstrom
                              adsorbate_species=[
                                  'C', 'H', 'O', 'N', 'F', 'S', 'Cl', 'P'],
                              surface_tol=.5,
@@ -490,8 +672,11 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     interactions.update({surface_name: {}})
     interactions[surface_name].update({adsorbate_name: {}})
     interactions[surface_name][adsorbate_name].update({site_name: {}})
-    interactions[surface_name][adsorbate_name][site_name].update({'V': {}})
+    interactions[surface_name][adsorbate_name][site_name].update({'D': {}})
     interactions[surface_name][adsorbate_name][site_name].update({'site_pos': site_pos})
+
+    if locov_bader_filename is not None:
+        interactions[surface_name][adsorbate_name][site_name].update({'Q': {}})
 
     # store filepaths to
     interactions[surface_name][adsorbate_name][site_name].update({
@@ -501,8 +686,8 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         '_locov_dosfile': os.path.realpath(locov_dosfile),
         '_hicov_logfile': os.path.realpath(hicov_logfile),
         '_hicov_dosfile': os.path.realpath(hicov_dosfile),
-        '_locov_densityfile': os.path.realpath(locov_densityfile) if locov_densityfile else None ,
-        '_hicov_densityfile': os.path.realpath(hicov_densityfile) if hicov_densityfile else None ,
+        '_locov_densityfile': os.path.realpath(locov_densityfile) if locov_densityfile else None,
+        '_hicov_densityfile': os.path.realpath(hicov_densityfile) if hicov_densityfile else None,
     })
 
     # collect clean surface info
@@ -517,7 +702,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     clean_energy = clean.get_calculator().get_potential_energy()
     if verbose:
         print("Clean Surface Energy {clean_energy}".format(**locals()))
-        print(interactions[surface_name][adsorbate_name][site_name])
+        pprint.pprint(interactions[surface_name][adsorbate_name][site_name])
 
     clean_cell = clean.cell
     surface_atom = np.argmax(clean.positions[:, 2])
@@ -528,7 +713,9 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     # - reference d-band center
     clean_energies, clean_DOS, _ = get_DOS_hilbert(
         clean_surface_dosfile, clean_channels)
-    clean_E_d, _ = get_e_w(clean_energies, clean_DOS)
+    clean_E_d, clean_E_w  = get_e_w(clean_energies, clean_DOS)
+    ## EXPERIMENTAL
+    #clean_E_d += 4 * np.sqrt(clean_E_w)
     if verbose:
         print('clean d-band position {clean_E_d}'.format(**locals()))
         print('clean surface total energy {clean_energy} eV.'.format(**locals()))
@@ -537,10 +724,13 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     # - energy
     if verbose:
         print('Now reading {hicov_logfile} ... ({surface_name} {adsorbate_name}@{site_name})'.format(**locals()))
-    hicov_traj = espresso.io.read_log(hicov_logfile)
+    hicov = espresso.io.read_log(hicov_logfile)[-1]
+    if hicov_trajfile is not None:
+        hicov.set_positions(ase.io.read(hicov_trajfile).get_positions())
+        hicov.set_chemical_symbols(ase.io.read(hicov_trajfile).get_chemical_symbols())
 
-    hicov = hicov_traj[-1]
-    hicov_energy = hicov.get_calculator().get_potential_energy()
+    #hicov_energy = hicov.get_calculator().get_potential_energy()
+    hicov_energy = espresso.io.read_energies(hicov_logfile)[-1]
     hicov_cell = hicov.cell
     hicov_surface_area = np.linalg.norm(np.outer(hicov.cell[0], hicov.cell[1]))
 
@@ -554,19 +744,24 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         hicov.get_chemical_symbols()) if species in adsorbate_species]
     slab_atoms = [i for i, species in enumerate(
         hicov.get_chemical_symbols()) if species not in adsorbate_species]
-    surface_atom = slab_atoms[np.argmax(hicov.positions[slab_atoms, 2])]
+    if verbose:
+        print('Hicov Slab Atoms {slab_atoms}, hicov adsorbate atoms {adsorbate_atoms}'.format(**locals()))
+
+    hicov_surface_atom = slab_atoms[np.argmax(hicov.positions[slab_atoms, 2])]
 
 
 
     if verbose:
-        print('Surface Atom {surface_atom}'.format(**locals()))
+        print('High Coverage Surface Atom {hicov_surface_atom}'.format(**locals()))
 
-    hicov_channels = [[surface_atom, 'd', 0]]
+    hicov_channels = [[hicov_surface_atom, 'd', 0]]
     if spinpol:
-        hicov_channels.append([surface_atom, 'd', 1])
+        hicov_channels.append([hicov_surface_atom, 'd', 1])
     hicov_energies, hicov_DOS, _ = get_DOS_hilbert(
         hicov_dosfile, hicov_channels)
-    hicov_E_d, _ = get_e_w(hicov_energies, hicov_DOS)
+    hicov_E_d, hicov_E_w = get_e_w(hicov_energies, hicov_DOS)
+    ## EXPERIMENTAL
+    #hicov_E_d += 4 * np.sqrt(hicov_E_w)
 
     if verbose:
         print('hicov d-band position {hicov_E_d}'.format(**locals()))
@@ -576,6 +771,8 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     interactions[surface_name][adsorbate_name][site_name].update(
         {'_D_clean': (clean_E_d)})
+    interactions[surface_name][adsorbate_name][site_name].update(
+        {'_D_hicov': (hicov_E_d)})
 
     if verbose:
         print("High Cov Energy {hicov_energy}, ({hicov_x:.2f}x{hicov_y:.2f})".format(
@@ -586,9 +783,14 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     if verbose:
         print('Now reading {locov_logfile} ... ({surface_name} {adsorbate_name}@{site_name})'.format(**locals()))
-    locov_traj = espresso.io.read_log(locov_logfile)
-    locov = locov_traj[-1]
-    locov_energy = locov.get_calculator().get_potential_energy()
+    locov = espresso.io.read_log(locov_logfile)[-1]
+
+    if locov_trajfile is not None:
+        locov.set_positions(ase.io.read(locov_trajfile).get_positions())
+        locov.set_chemical_symbols(ase.io.read(locov_trajfile).get_chemical_symbols())
+
+    #locov_energy = locov.get_calculator().get_potential_energy()
+    locov_energy = espresso.io.read_energies(locov_logfile)[-1]
     locov_surface_area = np.linalg.norm(np.outer(locov.cell[0], locov.cell[1]))
 
     locov_x = np.linalg.norm(locov.cell[0]) / np.linalg.norm(clean.cell[0])
@@ -611,6 +813,15 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
     interactions[surface_name][adsorbate_name][
         site_name].update({'delta_E': delta_E})
+
+
+    # DEBUGGING
+    interactions[surface_name][adsorbate_name][
+        site_name].update({'_hicov_energy': hicov_energy})
+    interactions[surface_name][adsorbate_name][
+        site_name].update({'_locov_energy': locov_energy})
+    interactions[surface_name][adsorbate_name][
+        site_name].update({'_clean_energy': clean_energy})
 
     if locov_densityfile :
         origin, cell, charge = extract_charge(locov_densityfile, clip=True)
@@ -641,34 +852,108 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     lowest_adsorbate_atom_hicov = adsorbate_atoms[
         np.argmin(hicov.positions[adsorbate_atoms, 2])]
 
+
+    # adsorbate p-band shifts
+    
+    
+
     # - d-band shift(s)
     adsorbate_atoms = [i for i, species in enumerate(
         locov.get_chemical_symbols()) if species in adsorbate_species]
     slab_atoms = [i for i, species in enumerate(
         locov.get_chemical_symbols()) if species not in adsorbate_species]
-    max_z = locov.positions[surface_atom, 2]
-    surface_atoms = [i for i, z in enumerate(
-        locov.positions[:, 2]) if abs(max_z - z) < surface_tol and i not in adsorbate_atoms]
-
-    lowest_adsorbate_atom = adsorbate_atoms[
+    max_z = locov.positions[slab_atoms, 2].max()
+    lowest_adsorbate_atom_locov = adsorbate_atoms[
         np.argmin(locov.positions[adsorbate_atoms, 2])]
 
+    surface_atoms = [i for i, (x, y, z) in enumerate(
+        locov.positions[:, :]) if abs(max_z - z) < surface_tol and i not in adsorbate_atoms
+                                #and np.linalg.norm(np.array([x, y, z]) - lowest_adsorbate_atom_locov.position) <= distance_cutoff
+                                ]
 
     # DEBUGGING
-    interactions[surface_name][adsorbate_name][site_name]['dz'] = hicov.positions[lowest_adsorbate_atom_hicov, 2] - locov.positions[lowest_adsorbate_atom, 2]
+    interactions[surface_name][adsorbate_name][site_name]['dz'] = hicov.positions[lowest_adsorbate_atom_hicov, 2] - locov.positions[lowest_adsorbate_atom_locov, 2]
+
+    DOS_adsorbate_locov, energies_adsorbate_locov, _ = get_DOS_hilbert(
+        locov_dosfile, [[lowest_adsorbate_atom_locov, 'p', 0]]
+    )
+    locov_adsorbate_E_p, locove_adsorbate_E_pw = get_e_w(
+        DOS_adsorbate_locov, energies_adsorbate_locov
+    )
+
+    DOS_adsorbate_hicov, energies_adsorbate_hicov, _ = get_DOS_hilbert(
+        hicov_dosfile, [[lowest_adsorbate_atom_hicov, 'p', 0]]
+    )
+    hicov_adsorbate_E_p, hicove_adsorbate_E_pw = get_e_w(
+        DOS_adsorbate_hicov, energies_adsorbate_hicov
+    )
+
+
+    interactions[surface_name][adsorbate_name][site_name]['delta_p'] = hicov_adsorbate_E_p - locov_adsorbate_E_p
 
 
     if verbose:
         print(
-            'Lowest Adsorbate Atom {lowest_adsorbate_atom}'.format(**locals()))
+            'Lowest Adsorbate Atom {lowest_adsorbate_atom_locov}'.format(**locals()))
         print('Surface Atoms {surface_atoms}'.format(**locals()))
+    
+    #######################################
+    # obtain low coverage Bader charges
+    #######################################
+    locov_bader_charges = [0.] * len(locov)
+    if locov_bader_filename is not None:
+        with open(locov_bader_filename) as bader_file:
+            for _ in range(3):
+                bader_file.readline()
+            line = ''
+            for i in range(len(locov)):
+            #while not '----------------' in line:
+                line = bader_file.readline()
+                _, x, y, z, charge, _, _ = line.split()
+                x, y, z = map(float, [x, y, z])
+                r = np.linalg.solve(locov.cell/ase.units.Bohr, np.array([x, y, z]))
+                r = tuple(r - np.round(r))
+                charge = float(charge)
+                locov_bader_charges[i] += float(charge)
+    # subtract neutral charge that the QE Pseudopotential is using
+    for i, charge in enumerate(locov_bader_charges):
+        locov_bader_charges[i] = charge - dbmi.util.pseudo_charges[locov[i].symbol]
 
-    for surface_atom in surface_atoms:
+
+    #######################################
+    # obtain high coverage Bader charges
+    #######################################
+    hicov_bader_charges = [0.] * len(hicov)
+    if hicov_bader_filename is not None:
+        with open(hicov_bader_filename) as bader_file:
+            for _ in range(3):
+                bader_file.readline()
+            line = ''
+            for i in range(len(hicov)):
+            #while not '----------------' in line:
+                line = bader_file.readline()
+                _, x, y, z, charge, _, _ = line.split()
+                x, y, z = map(float, [x, y, z])
+                r = np.linalg.solve(hicov.cell/ase.units.Bohr, np.array([x, y, z]))
+                r = tuple(r - np.round(r))
+                charge = float(charge)
+                hicov_bader_charges[i] += float(charge)
+    # subtract neutral charge that the QE Pseudopotential is using
+    for i, charge in enumerate(hicov_bader_charges):
+        hicov_bader_charges[i] = charge - dbmi.util.pseudo_charges[locov[i].symbol]
+
+    if verbose:
+        print('Hicov Bader Charges {hicov_bader_charges}, high coverage surface atom {hicov_surface_atom}'.format(**locals()))
+        print('Locov Bader Charges {locov_bader_charges}'.format(**locals()))
+    interactions[surface_name][adsorbate_name][site_name]['max_Q'] = - hicov_bader_charges[hicov_surface_atom]
+
+    bader_sum = 0.
+    for surface_atom in surface_atoms :
         # get the offset belonging to the Minimum Image Convention
         mic_positions = [(locov.positions[surface_atom] + locov.cell[0] * dx +
                           locov.cell[1] * dy, dx, dy) for dx in [-1, 0, 1] for dy in [-1, 0, 1]]
         key = lambda x: np.linalg.norm(
-            x[0] - locov.positions[lowest_adsorbate_atom])
+            x[0] - locov.positions[lowest_adsorbate_atom_locov])
         mic_positions = [(x[0], x[1], x[2], key(x)) for x in mic_positions]
         mic_positions.sort(key=key)
         mic_x, mic_y = (mic_positions[0])[1:3]
@@ -683,12 +968,14 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
         locov_energies, locov_DOS, _ = get_DOS_hilbert(
             locov_dosfile, locov_channels)
-        locov_E_d, _ = get_e_w(locov_energies, locov_DOS)
+        locov_E_d, locov_E_w = get_e_w(locov_energies, locov_DOS)
+        ## EXPERIMENTAL
+        #locov_E_d += 4 * np.sqrt(locov_E_w)
 
         crystal_coord = np.linalg.solve(
             clean.cell.T, locov.positions[
                 surface_atom] + mic_x * locov.cell[0] + mic_y * locov.cell[1]
-            - locov.positions[lowest_adsorbate_atom])
+            - locov.positions[lowest_adsorbate_atom_locov])
         crystal_x = int(round(crystal_coord[0]))
         crystal_y = int(round(crystal_coord[1]))
 
@@ -699,10 +986,18 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
             print(
                 "    At ({crystal_x}, {crystal_y}): {d_shift} eV".format(**locals()))
         interactions[surface_name][adsorbate_name][site_name][
-            'V'].setdefault(crystal_x, {})[crystal_y] = d_shift
+            'D'].setdefault(crystal_x, {})[crystal_y] = d_shift
 
-    if verbose:
-        print('locov d-band position {locov_E_d}'.format(**locals()))
+        if locov_bader_filename is not None:
+            interactions[surface_name][adsorbate_name][site_name][
+             'Q'].setdefault(crystal_x, {})[crystal_y] = locov_bader_charges[surface_atom]
+            bader_sum += locov_bader_charges[surface_atom]
+
+        if verbose:
+            print('locov d-band position {locov_E_d} atom # {surface_atom}'.format(**locals()))
+
+    interactions[surface_name][adsorbate_name][site_name].update(
+        {'delta_Q': - bader_sum}) 
 
     # save cell geometry
     interactions[surface_name]['_cell']  = clean.cell.tolist()
