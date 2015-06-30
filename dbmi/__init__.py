@@ -615,7 +615,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     # collect clean surface info
     # - energy
     if verbose:
-        print('Now reading {clean_surface_logfile} ... ({surface_name} {adsorbate_name}@{site_name})'.format(**locals()))
+        print('Now reading clean surface {clean_surface_logfile} ... ({surface_name} {adsorbate_name}@{site_name})'.format(**locals()))
 
     clean_traj = espresso.io.read_log(clean_surface_logfile)
 
@@ -645,7 +645,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     # collect high coverage surface info
     # - energy
     if verbose:
-        print('Now reading {hicov_logfile} ... ({surface_name} {adsorbate_name}@{site_name})'.format(**locals()))
+        print('Now reading high-coverage {hicov_logfile} ... ({surface_name} {adsorbate_name}@{site_name})'.format(**locals()))
     hicov = espresso.io.read_log(hicov_logfile)[-1]
     if hicov_trajfile is not None:
         hicov.set_positions(ase.io.read(hicov_trajfile).get_positions())
@@ -704,7 +704,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     # - energy
 
     if verbose:
-        print('Now reading {locov_logfile} ... ({surface_name} {adsorbate_name}@{site_name})'.format(**locals()))
+        print('Now reading  low coverage {locov_logfile} ... ({surface_name} {adsorbate_name}@{site_name})'.format(**locals()))
     locov = espresso.io.read_log(locov_logfile)[-1]
 
     if locov_trajfile is not None:
