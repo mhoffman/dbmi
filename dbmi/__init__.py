@@ -265,7 +265,7 @@ def merge(dict1, dict2):
             yield (k, dict2[k])
 
 
-def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, pbc=None, verbose=False, comment='', dipole_contribution=False, interaction='D'):
+def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, pbc=None, verbose=False, comment='', dipole_contribution=False, interaction='auto'):
     """Calculate the adsorbate-adsorbate interaction based in d-band perturbations and electrostatic dipoles
     of isolated adsorbates.
 
@@ -283,6 +283,16 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
     :type comment: str
 
     """
+
+    # check whether we have a coinage metal or not
+    # if we have a coinage metal use negative Bader charges as matrix elements
+    # if we have a non-coinage transition metal use d-Band centers as transition metal
+    if interaction == 'auto':
+        if dbmi.util.dband_filling[adsorbates[0][0][:2]] < 1. :
+            interaction = 'D'
+        else:
+            interaction = 'Q'
+
 
     dipole_factor = 2.
     # Kohn, W., and K. -H. Lau.
