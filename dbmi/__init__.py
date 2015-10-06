@@ -11,7 +11,6 @@ import unittest
 import pickle
 
 import numpy as np
-import scipy.signal
 import espresso.io
 import ase.units
 
@@ -588,6 +587,7 @@ def calculate_periodic_dipole_interaction(dp, cell, ER):
 
 
 def get_DOS_hilbert(pickle_filename, channels):
+    import scipy.signal
     with open(pickle_filename) as f:
         energies, dos, pdos = pickle.load(f)
 
