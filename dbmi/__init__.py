@@ -284,6 +284,7 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
 
     """
 
+
     # check whether we have a coinage metal or not
     # if we have a coinage metal use negative Bader charges as matrix elements
     # if we have a non-coinage transition metal use d-Band centers as transition metal
@@ -384,6 +385,7 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
 
     # calculate interaction energy
     interaction_energy = 0.
+
     for i, adsorbate in enumerate(adsorbates):
         surface, molecule, site, rel_x, rel_y = adsorbate
         if molecule is None :
@@ -400,11 +402,7 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
             print("INTERACTION LATTICE {molecule} {rel_x} {rel_y}\n{_out}".format(**locals()))
         for x in range(-DR, DR):
             for y in range(-DR, DR):
-
-                #print('rel_x {rel_x}, DR {DR}, x {x}, rel_y {rel_y}, DR {DR}, y {y}'.format(**locals()))
-
                 w = 0
-
                 if pbc is not None:
                     w = self_int[i][(rel_x + x + DR) %
                                     pbc[0], (rel_y + y + DR) % pbc[1]]
@@ -439,7 +437,7 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
         else:
             dband_delta_E = interactions[surface][molecule][site]['delta_E']
 
-        interaction_energy += dband_delta_E  * interaction_contrib
+        interaction_energy += dband_delta_E * interaction_contrib
 
         if verbose :
             print('   - d-band filling factor {interaction_contrib: .3f} {molecule}@{site} ({rel_x} {rel_y})'.format(**locals()))
@@ -493,7 +491,6 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
 
     if dipole_contribution:
         interaction_energy += ES_ENERGY
-
 
     if comment:
         print(
@@ -649,8 +646,8 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     ## EXPERIMENTAL
     #clean_E_d += 4 * np.sqrt(clean_E_w)
     if verbose:
-        print('clean d-band position {clean_E_d}'.format(**locals()))
-        print('clean surface total energy {clean_energy} eV.'.format(**locals()))
+        print('{surface_name} clean d-band position {clean_E_d}'.format(**locals()))
+        print('{surface_name} clean surface total energy {clean_energy} eV.'.format(**locals()))
 
     # collect high coverage surface info
     # - energy
@@ -662,7 +659,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         hicov.set_chemical_symbols(ase.io.read(hicov_trajfile).get_chemical_symbols())
 
     #hicov_energy = hicov.get_calculator().get_potential_energy()
-    hicov_energy = espresso.io.read_energies(hicov_logfile)[-1]
+    hicov_energy = espresso.io.read_energies(hicov_logfile)
     hicov_cell = hicov.cell
     hicov_surface_area = np.linalg.norm(np.outer(hicov.cell[0], hicov.cell[1]))
 
@@ -721,8 +718,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
         locov.set_positions(ase.io.read(locov_trajfile).get_positions())
         locov.set_chemical_symbols(ase.io.read(locov_trajfile).get_chemical_symbols())
 
-    #locov_energy = locov.get_calculator().get_potential_energy()
-    locov_energy = espresso.io.read_energies(locov_logfile)[-1]
+    locov_energy = espresso.io.read_energies(locov_logfile)
     locov_surface_area = np.linalg.norm(np.outer(locov.cell[0], locov.cell[1]))
 
     locov_x = np.linalg.norm(locov.cell[0]) / np.linalg.norm(clean.cell[0])
@@ -786,8 +782,8 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
 
 
     # adsorbate p-band shifts
-    
-    
+
+
 
     # - d-band shift(s)
     adsorbate_atoms = [i for i, species in enumerate(
@@ -806,29 +802,35 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
     # DEBUGGING
     interactions[surface_name][adsorbate_name][site_name]['dz'] = hicov.positions[lowest_adsorbate_atom_hicov, 2] - locov.positions[lowest_adsorbate_atom_locov, 2]
 
-    DOS_adsorbate_locov, energies_adsorbate_locov, _ = get_DOS_hilbert(
-        locov_dosfile, [[lowest_adsorbate_atom_locov, 'p', 0]]
-    )
-    locov_adsorbate_E_p, locove_adsorbate_E_pw = get_e_w(
-        DOS_adsorbate_locov, energies_adsorbate_locov
-    )
+    try:
+        DOS_adsorbate_locov, energies_adsorbate_locov, _ = get_DOS_hilbert(
+            locov_dosfile, [[lowest_adsorbate_atom_locov, 'p', 0]]
+        )
+        locov_adsorbate_E_p, locove_adsorbate_E_pw = get_e_w(
+            DOS_adsorbate_locov, energies_adsorbate_locov
+        )
 
-    DOS_adsorbate_hicov, energies_adsorbate_hicov, _ = get_DOS_hilbert(
-        hicov_dosfile, [[lowest_adsorbate_atom_hicov, 'p', 0]]
-    )
-    hicov_adsorbate_E_p, hicove_adsorbate_E_pw = get_e_w(
-        DOS_adsorbate_hicov, energies_adsorbate_hicov
-    )
+        DOS_adsorbate_hicov, energies_adsorbate_hicov, _ = get_DOS_hilbert(
+            hicov_dosfile, [[lowest_adsorbate_atom_hicov, 'p', 0]]
+        )
+        hicov_adsorbate_E_p, hicove_adsorbate_E_pw = get_e_w(
+            DOS_adsorbate_hicov, energies_adsorbate_hicov
+        )
 
 
-    interactions[surface_name][adsorbate_name][site_name]['delta_p'] = hicov_adsorbate_E_p - locov_adsorbate_E_p
+        interactions[surface_name][adsorbate_name][site_name]['delta_p'] = hicov_adsorbate_E_p - locov_adsorbate_E_p
+    except Exception as e :
+        if verbose:
+            print('Caught error error in calculating delta_p {e}. Skipping ... may not contain full data.'.format(**locals()))
+        pass
+
 
 
     if verbose:
         print(
             'Lowest Adsorbate Atom {lowest_adsorbate_atom_locov}'.format(**locals()))
         print('Surface Atoms {surface_atoms}'.format(**locals()))
-    
+
     #######################################
     # obtain low coverage Bader charges
     #######################################
@@ -929,7 +931,7 @@ def collect_interaction_data(surface_name, adsorbate_name, site_name,
             print('locov d-band position {locov_E_d} atom # {surface_atom}'.format(**locals()))
 
     interactions[surface_name][adsorbate_name][site_name].update(
-        {'delta_Q': - bader_sum}) 
+        {'delta_Q': - bader_sum})
 
     # save cell geometry
     interactions[surface_name]['_cell']  = clean.cell.tolist()
