@@ -11,7 +11,6 @@ import unittest
 import pickle
 
 import numpy as np
-import scipy.signal
 import espresso.io
 import ase.units
 
@@ -450,7 +449,11 @@ def calculate_interaction_energy(interactions, adsorbates, DR=4, ER1=5, ER2=5, p
         locov_cell = np.array(interactions[surface1]['_locov_cell'])
 
         # dipole self-interaction correction
-        locov_dipole1 = interactions[surface1][molecule1][site1]['locov_dipole']
+        try:
+            locov_dipole1 = interactions[surface1][molecule1][site1]['locov_dipole']
+        except KeyError as e:
+            print('Error "{e}" Surface1 "{surface1}" Molecule1 "{molecule1}" Site1 "{site1}".'.format(**locals()))
+            raise
         locov_ES1 = dipole_factor * locov_dipole1**2 * calculate_periodic_dipole_interaction(1., locov_cell, ER1) / 2.
         #adsorbate1_ES_energy -= locov_ES1
         if verbose :
@@ -521,6 +524,7 @@ def calculate_periodic_dipole_interaction(dp, cell, ER):
 
 
 def get_DOS_hilbert(pickle_filename, channels):
+    import scipy.signal
     with open(pickle_filename) as f:
         energies, dos, pdos = pickle.load(f)
 
