@@ -18,13 +18,28 @@ def width(x, y):
     """
     return 4*np.sqrt(second_moment(x, y))
 
-def get_abc(x, y, N_d=10.):
+def get_abc(x, y, N_d=10., self_consistent=False):
     """Return parameters of semi-elliptical model for given distribution.
     The area under the curve is normalized to N_d = 10.
     """
+    tol = 1e-7
+
     E_d = first_moment(x, y)
     W_d = width(x, y)
-    return W_d / 2, 4*N_d/W_d/np.pi, E_d
+
+    if not self_consistent:
+        return W_d / 2, 4*N_d/W_d/np.pi, E_d
+
+    a, b, c = get_abc(x, y)
+    while True:
+        a1, b1, c1 = get_abc(np.ma.masked_outside(x, c-a, c+a),
+                          np.ma.masked_outside(y, c-a, c+a),)
+        if np.abs(b1 - b) < tol:
+            break
+        a, b, c = a1, b1, c1
+
+    return a, b, c
+
 
 def ellipsis(x, a=1., b=1., c=0.):
     """Return (semi-)ellipsis parametrized by
@@ -36,8 +51,8 @@ def ellipsis(x, a=1., b=1., c=0.):
     y[np.isnan(y)] = 0.
     return y
 
-def get_ellipsis_and_hilbert(x, y, N_d=10.):
-    a, b, c = get_abc(x, y, N_d=N_d)
+def get_ellipsis_and_hilbert(x, y, N_d=10., self_consistent=False):
+    a, b, c = get_abc(x, y, N_d=N_d, self_consistent=self_consistent)
     ellipsis_model = ellipsis(x, a=a, b=b, c=c)
     hilbert_transform = np.imag(scipy.signal.hilbert(ellipsis_model))
     return ellipsis_model, hilbert_transform
@@ -49,17 +64,20 @@ if __name__ == '__main__':
 
 
     x = np.arange(-10, 10, .1)
-    noise = np.random.random(x.shape) * .1
+    noise = np.random.random(x.shape) * .3
     y = ellipsis(x, 6, 1, -2.4) + noise
-    raw_hilbert = np.imag(scipy.signal.hilbert(y))
-    el, H = get_ellipsis_and_hilbert(x, y)
 
-    plt.xlim((-10., 10))
+    for self_consistent in [True, False]:
+
+        raw_hilbert = np.imag(scipy.signal.hilbert(y))
+        el, H = get_ellipsis_and_hilbert(x, y, N_d=10, self_consistent=self_consistent)
+        plt.plot(x, el, '-', label='semi-elliptic model {self_consistent}'.format(**locals()))
+        plt.plot(x, H, '--', label='elliptic Hilbert transform {self_consistent}'.format(**locals()))
+
+    plt.xlim((-20., 20))
     plt.plot(x, y, 'k-', label='raw signal')
     plt.plot(x, raw_hilbert, 'k--', label='raw Hilbert')
 
-    plt.plot(x, el, 'r-', label='semi-elliptic model')
-    plt.plot(x, H, 'r--', label='elliptic Hilbert transform')
 
     leg = plt.legend(loc='best')
     leg.get_frame().set_alpha(.5)
